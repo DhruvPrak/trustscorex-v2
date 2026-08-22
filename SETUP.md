@@ -1,5 +1,42 @@
 # TrustScoreX v2 — Setup Guide
 
+## What changed — continuous identity verification (this update)
+
+Previously, identity was checked once at registration (ID photo vs. live
+camera) but never again — so nothing stopped a student from handing the
+camera to someone else once the exam started. Now:
+
+- **`public/exam.html`** re-checks identity every second, not just face
+  *presence* every 4 seconds. It compares the live camera's face
+  descriptor against the 128-d descriptor captured from the student's ID
+  photo at registration (already stored in
+  `student.idVerification.faceEmbedding`). A sustained mismatch fires a
+  new `face_mismatch` event — the highest-severity event in
+  `utils/trustScore.js`, since it's the strongest single signal of
+  impersonation.
+- **Blur/covered-lens detection**: a Laplacian-variance sharpness check
+  runs every second on the raw frame, independent of face detection —
+  catches a hand over the lens or a badly out-of-focus camera
+  (`camera_blurred_or_covered`, low severity, debounced 3s since it's more
+  prone to one-off false positives than the others).
+- **Suspicious objects**: a `coco-ssd` pass every 3rd tick flags a phone,
+  book, or second device in frame (`suspicious_object_detected`),
+  rate-limited to once per 10s per object type.
+- **Multiple faces** still fires immediately (no debounce) — it's rarely a
+  false positive and is the clearest "someone else is here" signal.
+- **`public/index.html` step 4 (device check)** now runs the same blur +
+  identity-match checks pre-exam, at the same 1s cadence, so a bad camera
+  setup or an identity mismatch surfaces before the exam starts rather
+  than during it.
+- **No-webcam accommodation** (`student.preferences.hasWebcam`) still
+  disables all of the above — both client-side (loop never starts) and
+  server-side (`routes/examRoutes.js` ignores any camera-dependent event
+  type for those students even if one is posted directly to the API).
+- Blinking / brief look-aways are handled by debouncing (requiring
+  consecutive missed frames, not a single bad one), not by any special
+  eye-state logic — face-api.js's recognition net is robust to blinking on
+  its own since it reads overall face geometry, not eye state.
+
 ## What changed from v1
 - **Real trust scores.** No more `Math.random()`. Score starts at 100 and
   decreases based on actual logged events (tab switches, no-face-detected,

@@ -8,6 +8,16 @@ const SEVERITY = {
   right_click: 2,
   no_face_detected: 6,
   multiple_faces_detected: 12,
+  // Continuous per-second identity check (exam.html) catching the "handed
+  // the camera to someone else mid-exam" scenario — highest weight since
+  // this is the strongest single signal of impersonation.
+  face_mismatch: 25,
+  // Laplacian-variance blur/covered-lens check — kept low because a soft
+  // or dim frame is often innocent (bad lighting, hand adjusting the
+  // laptop), unlike a confirmed face mismatch or a second face.
+  camera_blurred_or_covered: 4,
+  // coco-ssd catching a phone/book/second device in frame.
+  suspicious_object_detected: 10,
   devtools_opened: 15,
 };
 

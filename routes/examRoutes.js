@@ -19,7 +19,14 @@ router.post("/event", async (req, res) => {
   // Server-side enforcement of personalization — mirrors the client-side
   // skip in exam.html, but re-checked here so a no-webcam student can't be
   // dinged by a face-detection event fired directly against the API.
-  const isFaceEvent = type === "no_face_detected" || type === "multiple_faces_detected";
+  const CAMERA_DEPENDENT_EVENTS = new Set([
+    "no_face_detected",
+    "multiple_faces_detected",
+    "face_mismatch",
+    "camera_blurred_or_covered",
+    "suspicious_object_detected",
+  ]);
+  const isFaceEvent = CAMERA_DEPENDENT_EVENTS.has(type);
   if (isFaceEvent && !student.preferences.hasWebcam) {
     return res.json({
       message: "Event ignored — student has no-webcam accommodation",

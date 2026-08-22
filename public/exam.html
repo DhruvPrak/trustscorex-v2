@@ -6,6 +6,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="/css/common.css">
 <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<!-- Used only for the suspicious-object check (phone/book in frame) during
+     the exam. face-api.js bundles its own internal tfjs-core, so this
+     separate @tensorflow/tfjs + coco-ssd pair doesn't conflict with it. -->
+<script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 </head>
 <body>
   <div class="nav">
@@ -87,6 +92,11 @@
     // no-webcam students skip camera/face monitoring entirely, and a
     // banner shows what's active/adapted so it's never a silent change.
     let studentPrefs = { hasWebcam: true, reducedSensitivity: false };
+    // The 128-d descriptor captured from this student's ID photo at
+    // registration (see index.html step 3). Comparing every live frame
+    // against this — not just checking "a face is present" — is what
+    // catches the camera being handed to someone else mid-exam.
+    let registeredDescriptor = null;
     async function initPersonalizedSession() {
       if (!studentId) return;
       try {
@@ -94,6 +104,9 @@
         if (!res.ok) return;
         const student = await res.json();
         studentPrefs = student.preferences || studentPrefs;
+        if (Array.isArray(student.idVerification?.faceEmbedding)) {
+          registeredDescriptor = student.idVerification.faceEmbedding;
+        }
 
         const items = [];
         if (!studentPrefs.hasWebcam) {
@@ -107,6 +120,9 @@
         }
         if (studentPrefs.accessibilityNotes) {
           items.push(`Notes on file: ${studentPrefs.accessibilityNotes}`);
+        }
+        if (studentPrefs.hasWebcam && !registeredDescriptor) {
+          items.push('No ID verification on file — live identity matching will be skipped, only presence/multi-face/blur checks run');
         }
 
         const banner = document.getElementById('personalization-banner');
@@ -165,41 +181,190 @@
     document.addEventListener('paste', () => sendEvent('paste_attempt'));
     document.addEventListener('contextmenu', () => sendEvent('right_click'));
 
-    // --- Face detection via face-api.js (real client-side AI, tiny model) ---
+    // --- Face detection via face-api.js (real client-side AI) ---
+    // Runs every second, checking four things per frame:
+    //   1. no face (debounced — 2 consecutive misses, ~2s, so a blink or
+    //      brief look-away never fires this on its own)
+    //   2. more than one face (fires immediately — rarely a false positive,
+    //      and this is the actual "handed the camera to someone else"
+    //      signature you get when a second person leans into frame)
+    //   3. face_mismatch — the live face doesn't match the descriptor
+    //      captured from the ID photo at registration (debounced, 4
+    //      consecutive misses ~4s, then re-fires every ~5s while it stays
+    //      mismatched) — this is what catches student A handing the whole
+    //      camera/laptop to student B
+    //   4. camera_blurred_or_covered — Laplacian-variance sharpness check
+    //      on the raw frame (debounced 3 consecutive misses ~3s, since
+    //      blur is more prone to one-off false positives than the others)
+    // A 5th, lighter check for suspicious objects (phone/book in frame)
+    // runs every 3rd tick via coco-ssd, since that model is heavier.
     const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
     const faceStatus = document.getElementById('face-status');
-    let noFaceStreak = 0;
+    // NOTE: this is intentionally looser than utils/faceMatch.js's
+    // LIVE_MATCH_THRESHOLD (0.55, used for the one-off registration
+    // decision). 0.6 is face-api.js's own documented "same person"
+    // default. The registration check gets one posed, straight-at-camera
+    // frame and can afford to be strict; this check runs every second
+    // through natural exam behavior — looking down at paper, head turns,
+    // shifting light — which genuinely increases descriptor distance for
+    // the *same* person. Keeping 0.55 here was producing false-positive
+    // face_mismatch events for legitimate students mid-exam even though
+    // the one-shot device check (same threshold, one ideal frame) passed
+    // cleanly. If you tighten this back up, expect more false positives
+    // during normal exam behavior, not just from real impersonation.
+    const MATCH_THRESHOLD = 0.6;
+    const BLUR_VARIANCE_THRESHOLD = 40;
+    const streaks = { noFace: 0, mismatch: 0, blur: 0 };
+    let tick = 0;
+    let cocoModel = null;
+
+    // Reused offscreen canvas for the blur check, sized small on purpose —
+    // sharpness only needs a coarse sample, not full resolution, and this
+    // keeps a per-second synchronous canvas read cheap.
+    const blurCanvas = document.createElement('canvas');
+    blurCanvas.width = 160;
+    blurCanvas.height = 120;
+    const blurCtx = blurCanvas.getContext('2d', { willReadFrequently: true });
+
+    function euclideanDistance(a, b) {
+      let sum = 0;
+      for (let i = 0; i < a.length; i++) {
+        const diff = a[i] - b[i];
+        sum += diff * diff;
+      }
+      return Math.sqrt(sum);
+    }
+
+    // Classic Laplacian-variance sharpness measure: low variance means the
+    // frame is blurry, out of focus, or the lens is covered/obstructed.
+    // Catches the "wave a hand over the camera" or "point it at the
+    // ceiling" tricks that a plain no-face check can miss if a low-quality
+    // face-shaped blob still barely passes detection.
+    function isFrameBlurry(video) {
+      const w = blurCanvas.width, h = blurCanvas.height;
+      blurCtx.drawImage(video, 0, 0, w, h);
+      const { data } = blurCtx.getImageData(0, 0, w, h);
+
+      const gray = new Float32Array(w * h);
+      for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+        gray[p] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      }
+
+      let sum = 0, sumSq = 0, count = 0;
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const idx = y * w + x;
+          const lap = 4 * gray[idx] - gray[idx - 1] - gray[idx + 1] - gray[idx - w] - gray[idx + w];
+          sum += lap;
+          sumSq += lap * lap;
+          count++;
+        }
+      }
+      const mean = sum / count;
+      const variance = sumSq / count - mean * mean;
+      return variance < BLUR_VARIANCE_THRESHOLD;
+    }
+
+    // coco-ssd labels worth flagging, and the event/severity each maps to
+    // (see utils/trustScore.js — all currently share suspicious_object_detected).
+    const SUSPICIOUS_OBJECT_LABELS = new Set(['cell phone', 'book', 'laptop']);
+    const OBJECT_MIN_CONFIDENCE = 0.6;
+    const lastObjectFire = {};
+    const OBJECT_REPEAT_SUPPRESS_MS = 10000; // don't spam the same object more than once per 10s
+
+    async function checkSuspiciousObjects(video) {
+      if (!cocoModel) return;
+      try {
+        const predictions = await cocoModel.detect(video);
+        const now = Date.now();
+        for (const pred of predictions) {
+          if (!SUSPICIOUS_OBJECT_LABELS.has(pred.class)) continue;
+          if (pred.score < OBJECT_MIN_CONFIDENCE) continue;
+          if (now - (lastObjectFire[pred.class] || 0) < OBJECT_REPEAT_SUPPRESS_MS) continue;
+          lastObjectFire[pred.class] = now;
+          sendEvent('suspicious_object_detected', { label: pred.class, confidence: Number(pred.score.toFixed(2)) });
+        }
+      } catch (e) { /* object model optional — never block the main loop on it */ }
+    }
 
     async function startFaceMonitoring() {
       try {
-        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        ]);
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         const video = document.getElementById('video');
         video.srcObject = stream;
-        faceStatus.textContent = 'Model loaded — monitoring face presence every 4s.';
+
+        // coco-ssd is optional polish — if the CDN script didn't load or
+        // the model fails, everything else keeps working.
+        if (typeof cocoSsd !== 'undefined') {
+          try { cocoModel = await cocoSsd.load(); } catch (e) { cocoModel = null; }
+        }
+
+        faceStatus.textContent = registeredDescriptor
+          ? 'Models loaded — verifying identity every second.'
+          : 'Models loaded — monitoring presence every second (no ID descriptor to match against).';
 
         setInterval(async () => {
+          tick++;
+
+          if (isFrameBlurry(video)) {
+            streaks.blur++;
+            if (streaks.blur === 3) sendEvent('camera_blurred_or_covered');
+          } else {
+            streaks.blur = 0;
+          }
+
           // scoreThreshold filters out low-confidence guesses — same fix as
           // the onboarding device check, so a covered/obstructed lens
-          // during the exam correctly reads as "no face" instead of a
-          // false-positive "OK".
-          const detections = (await faceapi.detectAllFaces(
-            video,
-            new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 })
-          )).filter(d => d.score >= 0.6);
-          if (detections.length === 0) {
-            noFaceStreak++;
+          // correctly reads as "no face" instead of a false-positive "OK".
+          const detections = await faceapi
+            .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 }))
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+          const confident = detections.filter(d => d.detection.score >= 0.6);
+
+          if (confident.length === 0) {
+            streaks.noFace++;
+            streaks.mismatch = 0;
             faceStatus.textContent = 'No face detected.';
-            if (noFaceStreak === 2) sendEvent('no_face_detected'); // debounce brief look-aways
-          } else if (detections.length > 1) {
-            faceStatus.textContent = `${detections.length} faces detected.`;
-            sendEvent('multiple_faces_detected', { count: detections.length });
-            noFaceStreak = 0;
+            if (streaks.noFace === 2) sendEvent('no_face_detected'); // debounce brief look-aways/blinks
+          } else if (confident.length > 1) {
+            faceStatus.textContent = `${confident.length} faces detected.`;
+            sendEvent('multiple_faces_detected', { count: confident.length });
+            streaks.noFace = 0;
+            streaks.mismatch = 0;
           } else {
-            faceStatus.textContent = 'Face detected — OK.';
-            noFaceStreak = 0;
+            streaks.noFace = 0;
+            if (registeredDescriptor) {
+              const distance = euclideanDistance(confident[0].descriptor, registeredDescriptor);
+              if (distance >= MATCH_THRESHOLD) {
+                streaks.mismatch++;
+                faceStatus.textContent = 'Face does not match registered ID.';
+                // Fire at 4 consecutive misses (~4s — wider than no-face's
+                // 2s since natural head movement can occasionally push a
+                // couple of frames over threshold even for the right
+                // person). Then keep re-firing every 5s while it stays
+                // mismatched, instead of firing once and going silent —
+                // a sustained impersonation should keep costing score,
+                // not take a single flat 25-point hit for the whole exam.
+                if (streaks.mismatch === 4 || (streaks.mismatch > 4 && streaks.mismatch % 5 === 0)) {
+                  sendEvent('face_mismatch', { distance: Number(distance.toFixed(3)) });
+                }
+              } else {
+                streaks.mismatch = 0;
+                faceStatus.textContent = 'Face detected — identity verified.';
+              }
+            } else {
+              faceStatus.textContent = 'Face detected — OK (no ID descriptor to verify against).';
+            }
           }
-        }, 4000);
+
+          if (tick % 3 === 0) checkSuspiciousObjects(video);
+        }, 1000);
       } catch (err) {
         faceStatus.textContent = 'Camera/model unavailable — face monitoring skipped (' + err.message + ').';
       }
