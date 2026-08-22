@@ -246,7 +246,103 @@ tr:last-child td { border-bottom: none; }
   z-index: 999;
 }
 
+/* Onboarding wizard */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 32px;
+  max-width: 520px;
+}
+.stepper .step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+.stepper .step .dot {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--ink-line);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-soft);
+  flex-shrink: 0;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.stepper .step .label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+.stepper .step.active .dot {
+  border-color: var(--gold);
+  color: var(--gold-bright);
+}
+.stepper .step.active .label { color: var(--parchment); }
+.stepper .step.done .dot {
+  border-color: var(--verified);
+  background: var(--verified);
+  color: var(--parchment);
+}
+.stepper .step.done .label { color: var(--verified); }
+.stepper .connector {
+  flex: 0 0 24px;
+  height: 1px;
+  background: var(--ink-line);
+  margin: 0 -2px;
+}
+
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid #e8e3d4;
+}
+.check-row:last-child { border-bottom: none; }
+.check-row input[type="checkbox"] {
+  width: auto;
+  margin: 3px 0 0;
+  accent-color: var(--gold);
+  flex-shrink: 0;
+}
+.check-row .check-text strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+.check-row .check-text span {
+  font-size: 13px;
+  color: #6b6450;
+  line-height: 1.4;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 0;
+  border-bottom: 1px solid #e8e3d4;
+  font-size: 14px;
+}
+.summary-row:last-child { border-bottom: none; }
+.summary-row .k {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a8266;
+}
+.summary-row .v { text-align: right; }
+
 @media (max-width: 600px) {
+  .stepper .label { display: none; }
+  .stepper .connector { flex-basis: 12px; }
   h1.title { font-size: 30px; }
   .nav { flex-direction: column; gap: 12px; }
 }

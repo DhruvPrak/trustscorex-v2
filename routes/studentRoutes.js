@@ -27,6 +27,54 @@ router.get("/students", async (req, res) => {
   res.json(students);
 });
 
+// Public: fetch a single student (used by the onboarding wizard + exam page
+// to read back preferences/onboarding state across steps)
+router.get("/students/:id", async (req, res) => {
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(404).json({ message: "Student not found" });
+  res.json(student);
+});
+
+// Public: step 2 of the wizard — save accommodation preferences
+router.patch("/students/:id/preferences", async (req, res) => {
+  const { hasWebcam, reducedSensitivity, accessibilityNotes } = req.body;
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(404).json({ message: "Student not found" });
+
+  if (hasWebcam !== undefined) student.preferences.hasWebcam = !!hasWebcam;
+  if (reducedSensitivity !== undefined) student.preferences.reducedSensitivity = !!reducedSensitivity;
+  if (accessibilityNotes !== undefined) student.preferences.accessibilityNotes = String(accessibilityNotes).trim();
+  student.onboarding.step = Math.max(student.onboarding.step, 2);
+
+  await student.save();
+  res.json(student);
+});
+
+// Public: step 3 of the wizard — record the outcome of the live device check
+router.patch("/students/:id/device-check", async (req, res) => {
+  const { passed } = req.body;
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(404).json({ message: "Student not found" });
+
+  student.onboarding.deviceCheckPassed = !!passed;
+  student.onboarding.step = Math.max(student.onboarding.step, 3);
+
+  await student.save();
+  res.json(student);
+});
+
+// Public: step 4 of the wizard — final consent, marks onboarding complete
+router.patch("/students/:id/onboarding-complete", async (req, res) => {
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(404).json({ message: "Student not found" });
+
+  student.onboarding.step = 4;
+  student.onboarding.completed = true;
+
+  await student.save();
+  res.json(student);
+});
+
 router.get("/search/:name", async (req, res) => {
   const regex = new RegExp(req.params.name, "i");
   const students = await Student.find({ name: regex });

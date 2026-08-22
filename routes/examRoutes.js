@@ -16,11 +16,24 @@ router.post("/event", async (req, res) => {
   const student = await Student.findById(studentId);
   if (!student) return res.status(404).json({ message: "Student not found" });
 
+  // Server-side enforcement of personalization — mirrors the client-side
+  // skip in exam.html, but re-checked here so a no-webcam student can't be
+  // dinged by a face-detection event fired directly against the API.
+  const isFaceEvent = type === "no_face_detected" || type === "multiple_faces_detected";
+  if (isFaceEvent && !student.preferences.hasWebcam) {
+    return res.json({
+      message: "Event ignored — student has no-webcam accommodation",
+      newScore: student.trustScore,
+      status: student.status,
+    });
+  }
+
   const severity = severityFor(type);
   await ExamEvent.create({ student: studentId, type, severity, meta });
 
   const allEvents = await ExamEvent.find({ student: studentId });
-  student.trustScore = computeScoreFromEvents(allEvents);
+  const leniency = student.preferences.reducedSensitivity ? 0.7 : 1;
+  student.trustScore = computeScoreFromEvents(allEvents, leniency);
   await student.save();
 
   res.json({

@@ -39,7 +39,7 @@
 
       <div class="card">
         <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Score</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Score</th><th>Status</th><th>Accommodations</th><th>Actions</th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
@@ -84,6 +84,15 @@
       showView();
     }
 
+    function accommodationBadges(s) {
+      const prefs = s.preferences || {};
+      const badges = [];
+      if (!prefs.hasWebcam) badges.push('<span class="badge status-warning">No webcam</span>');
+      if (prefs.reducedSensitivity) badges.push('<span class="badge status-warning">Reduced sensitivity</span>');
+      if (prefs.accessibilityNotes) badges.push('<span class="badge status-clean" title="' + prefs.accessibilityNotes.replace(/"/g, '&quot;') + '">Notes</span>');
+      return badges.join(' ') || '<span style="color:#8a8266; font-size:12px;">—</span>';
+    }
+
     async function loadStudents() {
       const students = await fetch('/api/students').then(r => r.json());
       document.getElementById('rows').innerHTML = students.map(s => `
@@ -92,12 +101,13 @@
           <td>${s.email}</td>
           <td style="font-family:var(--font-mono);">${s.trustScore}</td>
           <td><span class="badge status-${s.status}">${s.status.replace('_',' ')}</span></td>
+          <td>${accommodationBadges(s)}</td>
           <td>
             <button class="btn-sm" onclick="overrideScore('${s._id}')">Edit score</button>
             <button class="btn-sm btn-danger" onclick="removeStudent('${s._id}')">Delete</button>
           </td>
         </tr>
-      `).join('') || '<tr><td colspan="5">No students yet.</td></tr>';
+      `).join('') || '<tr><td colspan="6">No students yet.</td></tr>';
     }
 
     async function overrideScore(id) {

@@ -28,8 +28,13 @@
       in real time from what's actually detected, not a random number.
     </p>
 
+    <div id="personalization-banner" class="card-dark" style="display:none; margin-bottom:24px; border-color: var(--gold);">
+      <strong style="font-family: var(--font-mono); font-size:12px; text-transform:uppercase; letter-spacing:0.04em; color: var(--gold-bright);">Personalized for this session</strong>
+      <ul id="personalization-list" style="margin:10px 0 0; padding-left:18px; font-size:13px; color: var(--text-soft); line-height:1.6;"></ul>
+    </div>
+
     <div style="display:flex; gap:24px; flex-wrap:wrap;">
-      <div class="card" style="flex: 1; min-width: 280px;">
+      <div class="card" style="flex: 1; min-width: 280px;" id="webcam-panel">
         <video id="video" autoplay muted playsinline style="width:100%; border-radius:4px; background:#000;"></video>
         <p style="font-size:12px; font-family: var(--font-mono); color:#6b6450; margin-top:10px;" id="face-status">
           Waiting for camera + models…
@@ -76,6 +81,39 @@
     if (!studentId) {
       document.body.insertAdjacentHTML('afterbegin',
         '<div class="toast">No student selected. Register first from the home page.</div>');
+    }
+
+    // Fetches this student's saved preferences and adapts the session:
+    // no-webcam students skip camera/face monitoring entirely, and a
+    // banner shows what's active/adapted so it's never a silent change.
+    let studentPrefs = { hasWebcam: true, reducedSensitivity: false };
+    async function initPersonalizedSession() {
+      if (!studentId) return;
+      try {
+        const res = await fetch(`/api/students/${studentId}`);
+        if (!res.ok) return;
+        const student = await res.json();
+        studentPrefs = student.preferences || studentPrefs;
+
+        const items = [];
+        if (!studentPrefs.hasWebcam) {
+          items.push('Camera and face-presence monitoring: disabled (no-webcam accommodation)');
+          document.getElementById('webcam-panel').style.display = 'none';
+        } else {
+          items.push('Camera and face-presence monitoring: active');
+        }
+        if (studentPrefs.reducedSensitivity) {
+          items.push('Score sensitivity: reduced — flagged events count for less');
+        }
+        if (studentPrefs.accessibilityNotes) {
+          items.push(`Notes on file: ${studentPrefs.accessibilityNotes}`);
+        }
+
+        const banner = document.getElementById('personalization-banner');
+        const list = document.getElementById('personalization-list');
+        list.innerHTML = items.map(i => `<li>${i}</li>`).join('');
+        banner.style.display = 'block';
+      } catch (e) { /* offline - fall back to default (webcam on) */ }
     }
 
     const logEl = document.getElementById('log');
@@ -163,7 +201,14 @@
       }
     }
 
-    window.addEventListener('load', startFaceMonitoring);
+    window.addEventListener('load', async () => {
+      await initPersonalizedSession();
+      if (studentPrefs.hasWebcam) {
+        startFaceMonitoring();
+      } else {
+        faceStatus.textContent = 'Face monitoring skipped — no-webcam accommodation on file.';
+      }
+    });
   </script>
 </body>
 </html>
