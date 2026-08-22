@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TrustScoreX — Exam Integrity Monitoring</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+  <div class="nav">
+    <div class="nav-brand"><span class="mark">TX</span> TrustScoreX</div>
+    <div class="nav-links">
+      <a href="/index.html" class="active">Register</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/leaderboard.html">Leaderboard</a>
+      <a href="/risk.html">Risk Monitor</a>
+      <a href="/admin.html">Admin</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <p class="eyebrow">Exam Integrity Platform</p>
+    <h1 class="title">Every score, earned in<br>full view.</h1>
+    <p class="lede">
+      TrustScoreX watches for the signals that matter during an exam —
+      tab switching, missing faces, copy attempts — and turns them into
+      a single trust score, updated live. Register below, then start a
+      monitored exam session to see it work.
+    </p>
+
+    <div class="card" style="max-width: 420px;">
+      <label>Full name</label>
+      <input id="name" placeholder="e.g. Aditya Verma" />
+      <label>Email</label>
+      <input id="email" type="email" placeholder="you@college.edu" />
+      <button class="btn-gold" onclick="register()" style="width:100%;">Register student</button>
+      <div id="msg" style="margin-top:14px; font-size:13px;"></div>
+    </div>
+  </div>
+
+  <script>
+    async function register() {
+      const name = document.getElementById('name').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const msg = document.getElementById('msg');
+      if (!name || !email) { msg.textContent = 'Name and email are required.'; msg.style.color = '#c1443b'; return; }
+
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        msg.style.color = '#2e8b67';
+        msg.innerHTML = `Registered. <a href="/exam.html?studentId=${data._id}&name=${encodeURIComponent(name)}" style="color:#c79a3d;">Start monitored exam →</a>`;
+      } else {
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Something went wrong.';
+      }
+    }
+  </script>
+</body>
+</html>

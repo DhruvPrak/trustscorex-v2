@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TrustScoreX — Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+  <div class="nav">
+    <div class="nav-brand"><span class="mark">TX</span> TrustScoreX</div>
+    <div class="nav-links">
+      <a href="/index.html">Register</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/leaderboard.html">Leaderboard</a>
+      <a href="/risk.html">Risk Monitor</a>
+      <a href="/admin.html" class="active">Admin</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div id="login-view">
+      <p class="eyebrow">Restricted</p>
+      <h1 class="title">Admin sign in</h1>
+      <div class="card" style="max-width:380px;">
+        <label>Username</label>
+        <input id="username" value="admin" />
+        <label>Password</label>
+        <input id="password" type="password" />
+        <button class="btn-gold" style="width:100%;" onclick="login()">Sign in</button>
+        <div id="login-msg" style="margin-top:12px; font-size:13px;"></div>
+      </div>
+    </div>
+
+    <div id="admin-view" style="display:none;">
+      <p class="eyebrow">Control panel</p>
+      <h1 class="title">Manage students</h1>
+      <button class="btn-sm" onclick="logout()" style="margin-bottom:24px;">Sign out</button>
+
+      <div class="card">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Score</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tokenKey = 'tsx_admin_token';
+
+    function getToken() { return sessionStorage.getItem(tokenKey); }
+
+    function showView() {
+      const token = getToken();
+      document.getElementById('login-view').style.display = token ? 'none' : 'block';
+      document.getElementById('admin-view').style.display = token ? 'block' : 'none';
+      if (token) loadStudents();
+    }
+
+    async function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const msg = document.getElementById('login-msg');
+
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        sessionStorage.setItem(tokenKey, data.token);
+        showView();
+      } else {
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Login failed.';
+      }
+    }
+
+    function logout() {
+      sessionStorage.removeItem(tokenKey);
+      showView();
+    }
+
+    async function loadStudents() {
+      const students = await fetch('/api/students').then(r => r.json());
+      document.getElementById('rows').innerHTML = students.map(s => `
+        <tr>
+          <td>${s.name}</td>
+          <td>${s.email}</td>
+          <td style="font-family:var(--font-mono);">${s.trustScore}</td>
+          <td><span class="badge status-${s.status}">${s.status.replace('_',' ')}</span></td>
+          <td>
+            <button class="btn-sm" onclick="overrideScore('${s._id}')">Edit score</button>
+            <button class="btn-sm btn-danger" onclick="removeStudent('${s._id}')">Delete</button>
+          </td>
+        </tr>
+      `).join('') || '<tr><td colspan="5">No students yet.</td></tr>';
+    }
+
+    async function overrideScore(id) {
+      const val = prompt('New trust score (0-100):');
+      if (val === null) return;
+      const res = await fetch('/api/update-score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+        body: JSON.stringify({ id, trustScore: val })
+      });
+      if (res.status === 401) { logout(); return; }
+      loadStudents();
+    }
+
+    async function removeStudent(id) {
+      if (!confirm('Delete this student permanently?')) return;
+      const res = await fetch('/api/delete/' + id, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + getToken() }
+      });
+      if (res.status === 401) { logout(); return; }
+      loadStudents();
+    }
+
+    showView();
+  </script>
+</body>
+</html>

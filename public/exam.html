@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TrustScoreX — Monitored Exam Session</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/css/common.css">
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+<body>
+  <div class="nav">
+    <div class="nav-brand"><span class="mark">TX</span> TrustScoreX</div>
+    <div class="nav-links">
+      <a href="/index.html">Register</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/leaderboard.html">Leaderboard</a>
+      <a href="/risk.html">Risk Monitor</a>
+      <a href="/admin.html">Admin</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <p class="eyebrow" id="student-name">Loading student…</p>
+    <h1 class="title">Monitored exam session</h1>
+    <p class="lede">
+      Camera-based face detection and tab-focus tracking are running below.
+      Switch tabs, look away, or try to copy text — your trust score updates
+      in real time from what's actually detected, not a random number.
+    </p>
+
+    <div style="display:flex; gap:24px; flex-wrap:wrap;">
+      <div class="card" style="flex: 1; min-width: 280px;">
+        <video id="video" autoplay muted playsinline style="width:100%; border-radius:4px; background:#000;"></video>
+        <p style="font-size:12px; font-family: var(--font-mono); color:#6b6450; margin-top:10px;" id="face-status">
+          Waiting for camera + models…
+        </p>
+      </div>
+
+      <div class="card-dark" style="flex: 1; min-width: 280px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;">
+        <div class="seal status-clean" id="seal">
+          <div class="score" id="score-num">100</div>
+          <div class="label">Trust Score</div>
+        </div>
+        <div id="status-text" style="font-family: var(--font-mono); font-size:13px;">CLEAN</div>
+
+<div style="width:100%; max-width:280px;">
+  <div class="trust-bar">
+    <div class="trust-bar-zone" style="background:var(--risk); flex:50;"></div>
+    <div class="trust-bar-zone" style="background:var(--warning); flex:25;"></div>
+    <div class="trust-bar-zone" style="background:var(--verified); flex:25;"></div>
+    <div class="trust-bar-marker" id="bar-marker"></div>
+  </div>
+  <div class="trust-bar-labels">
+    <span style="color:var(--risk);">High risk</span>
+    <span style="color:var(--warning);">Warning</span>
+    <span style="color:var(--verified);">Clean</span>
+  </div>
+</div>
+</div>
+</div>
+
+    <div class="card-dark" style="margin-top:24px;">
+      <h3 style="margin-top:0; font-family: var(--font-display);">Live event log</h3>
+      <div id="log" style="font-family: var(--font-mono); font-size:12px; color: var(--text-soft); max-height:200px; overflow-y:auto;">
+        No events yet — behaving well.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const studentId = params.get('studentId');
+    const name = params.get('name') || 'Student';
+    document.getElementById('student-name').textContent = `Exam session — ${name}`;
+
+    if (!studentId) {
+      document.body.insertAdjacentHTML('afterbegin',
+        '<div class="toast">No student selected. Register first from the home page.</div>');
+    }
+
+    const logEl = document.getElementById('log');
+    const sealEl = document.getElementById('seal');
+    const scoreEl = document.getElementById('score-num');
+    const statusEl = document.getElementById('status-text');
+
+    function logLine(text) {
+      const line = document.createElement('div');
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+      logEl.prepend(line);
+    }
+
+    function applyStatus(status) {
+      sealEl.className = 'seal status-' + status;
+      statusEl.textContent = status.replace('_', ' ').toUpperCase();
+    }
+
+    async function sendEvent(type, meta = {}) {
+      if (!studentId) return;
+      try {
+        const res = await fetch('/api/exam/event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentId, type, meta })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          scoreEl.textContent = data.newScore;
+          applyStatus(data.status);
+          logLine(`${type.replace(/_/g, ' ')} → score ${data.newScore}`);
+        }
+      } catch (e) { /* offline - ignore for demo */ }
+    }
+
+    // --- Tab / window focus tracking ---
+    let lastHidden = 0;
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        lastHidden = Date.now();
+      } else {
+        sendEvent('tab_switch', { awayMs: Date.now() - lastHidden });
+      }
+    });
+    window.addEventListener('blur', () => sendEvent('window_blur'));
+
+    // --- Copy / paste / right-click ---
+    document.addEventListener('copy', () => sendEvent('copy_attempt'));
+    document.addEventListener('paste', () => sendEvent('paste_attempt'));
+    document.addEventListener('contextmenu', () => sendEvent('right_click'));
+
+    // --- Face detection via face-api.js (real client-side AI, tiny model) ---
+    const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+    const faceStatus = document.getElementById('face-status');
+    let noFaceStreak = 0;
+
+    async function startFaceMonitoring() {
+      try {
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        faceStatus.textContent = 'Model loaded — monitoring face presence every 4s.';
+
+        setInterval(async () => {
+          const detections = await faceapi.detectAllFaces(
+            video,
+            new faceapi.TinyFaceDetectorOptions()
+          );
+          if (detections.length === 0) {
+            noFaceStreak++;
+            faceStatus.textContent = 'No face detected.';
+            if (noFaceStreak === 2) sendEvent('no_face_detected'); // debounce brief look-aways
+          } else if (detections.length > 1) {
+            faceStatus.textContent = `${detections.length} faces detected.`;
+            sendEvent('multiple_faces_detected', { count: detections.length });
+            noFaceStreak = 0;
+          } else {
+            faceStatus.textContent = 'Face detected — OK.';
+            noFaceStreak = 0;
+          }
+        }, 4000);
+      } catch (err) {
+        faceStatus.textContent = 'Camera/model unavailable — face monitoring skipped (' + err.message + ').';
+      }
+    }
+
+    window.addEventListener('load', startFaceMonitoring);
+  </script>
+</body>
+</html>
