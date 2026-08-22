@@ -18,6 +18,16 @@ const onboardingSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const idVerificationSchema = new mongoose.Schema(
+  {
+    idPhotoDataUrl: { type: String, default: null }, // small base64 preview, for admin review only
+    faceEmbedding: { type: [Number], default: null }, // 128-d descriptor from the ID photo
+    verified: { type: Boolean, default: false }, // live camera matched the ID photo
+    verifiedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const studentSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -30,6 +40,7 @@ const studentSchema = new mongoose.Schema(
     },
     preferences: { type: preferencesSchema, default: () => ({}) },
     onboarding: { type: onboardingSchema, default: () => ({}) },
+    idVerification: { type: idVerificationSchema, default: () => ({}) },
   },
   { timestamps: true }
 );

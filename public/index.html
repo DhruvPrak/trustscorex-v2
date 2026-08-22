@@ -34,9 +34,11 @@
       <div class="connector"></div>
       <div class="step" data-step="2"><div class="dot">2</div><div class="label">Accommodations</div></div>
       <div class="connector"></div>
-      <div class="step" data-step="3"><div class="dot">3</div><div class="label">Device check</div></div>
+      <div class="step" data-step="3"><div class="dot">3</div><div class="label">Identity check</div></div>
       <div class="connector"></div>
-      <div class="step" data-step="4"><div class="dot">4</div><div class="label">Review</div></div>
+      <div class="step" data-step="4"><div class="dot">4</div><div class="label">Device check</div></div>
+      <div class="connector"></div>
+      <div class="step" data-step="5"><div class="dot">5</div><div class="label">Review</div></div>
     </div>
 
     <!-- Step 1: Basic info -->
@@ -78,8 +80,34 @@
       <div id="msg-2" style="margin-top:14px; font-size:13px;"></div>
     </div>
 
-    <!-- Step 3: Live device check -->
+    <!-- Step 3: Identity verification -->
     <div class="card" style="max-width: 460px; display:none;" id="step-3">
+      <p style="margin-top:0; font-size:14px; color:#6b6450;">
+        Upload a photo of your student ID, then let us confirm you're the same person with a quick live camera check.
+        This keeps one ID from being used to register multiple accounts.
+      </p>
+
+      <label>ID photo</label>
+      <input type="file" id="id-photo" accept="image/*" />
+      <img id="id-photo-preview" style="display:none; width:100%; border-radius:4px; margin-bottom:14px;" />
+      <p style="font-family: var(--font-mono); font-size:12px; color:#6b6450;" id="id-photo-status">No photo uploaded yet.</p>
+
+      <div id="live-verify-block" style="display:none; margin-top:14px;">
+        <label>Live camera check</label>
+        <video id="id-video" autoplay muted playsinline style="width:100%; border-radius:4px; background:#000; margin-bottom:10px;"></video>
+        <button onclick="runIdentityVerification()" style="width:100%;" id="verify-btn">Verify my identity</button>
+        <p style="font-family: var(--font-mono); font-size:12px; color:#6b6450; margin-top:10px;" id="id-verify-status"></p>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button onclick="goToStep(2)" style="flex:1;">Back</button>
+        <button class="btn-gold" onclick="goToStep(4)" style="flex:2;" id="id-continue-btn" disabled>Continue</button>
+      </div>
+      <div id="msg-3" style="margin-top:14px; font-size:13px;"></div>
+    </div>
+
+    <!-- Step 4: Live device check -->
+    <div class="card" style="max-width: 460px; display:none;" id="step-4">
       <p style="margin-top:0; font-size:14px; color:#6b6450;" id="device-check-intro">
         Let's test your camera and face detection now, so any problems surface here — not mid-exam.
       </p>
@@ -94,18 +122,19 @@
       </div>
 
       <div style="display:flex; gap:10px; margin-top:14px;">
-        <button onclick="goToStep(2)" style="flex:1;">Back</button>
+        <button onclick="goToStep(3)" style="flex:1;">Back</button>
         <button class="btn-gold" onclick="confirmDeviceCheck()" style="flex:2;" id="device-continue-btn">Continue</button>
       </div>
-      <div id="msg-3" style="margin-top:14px; font-size:13px;"></div>
+      <div id="msg-4" style="margin-top:14px; font-size:13px;"></div>
     </div>
 
-    <!-- Step 4: Review & consent -->
-    <div class="card" style="max-width: 460px; display:none;" id="step-4">
+    <!-- Step 5: Review & consent -->
+    <div class="card" style="max-width: 460px; display:none;" id="step-5">
       <p style="margin-top:0; font-size:14px; color:#6b6450;">Here's the personalized plan for your exam session.</p>
 
       <div class="summary-row"><span class="k">Name</span><span class="v" id="rev-name">—</span></div>
       <div class="summary-row"><span class="k">Email</span><span class="v" id="rev-email">—</span></div>
+      <div class="summary-row"><span class="k">Identity check</span><span class="v" id="rev-identity">—</span></div>
       <div class="summary-row"><span class="k">Face monitoring</span><span class="v" id="rev-webcam">—</span></div>
       <div class="summary-row"><span class="k">Sensitivity</span><span class="v" id="rev-sensitivity">—</span></div>
       <div class="summary-row"><span class="k">Notes</span><span class="v" id="rev-notes">—</span></div>
@@ -120,10 +149,10 @@
       </div>
 
       <div style="display:flex; gap:10px; margin-top:8px;">
-        <button onclick="goToStep(3)" style="flex:1;">Back</button>
+        <button onclick="goToStep(4)" style="flex:1;">Back</button>
         <button class="btn-gold" onclick="finishOnboarding()" style="flex:2;">Start monitored exam →</button>
       </div>
-      <div id="msg-4" style="margin-top:14px; font-size:13px;"></div>
+      <div id="msg-5" style="margin-top:14px; font-size:13px;"></div>
     </div>
   </div>
 
@@ -131,9 +160,23 @@
     let studentId = null;
     let studentName = '';
     let deviceCheckPassed = false;
+    let identityVerified = false;
+    let idEmbedding = null; // 128-d descriptor from the uploaded ID photo
+
+    const FACE_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+    let modelsLoaded = false;
+    async function ensureModelsLoaded() {
+      if (modelsLoaded) return;
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL),
+      ]);
+      modelsLoaded = true;
+    }
 
     function goToStep(n) {
-      for (let i = 1; i <= 4; i++) {
+      for (let i = 1; i <= 5; i++) {
         document.getElementById('step-' + i).style.display = (i === n) ? 'block' : 'none';
       }
       document.querySelectorAll('#stepper .step').forEach(el => {
@@ -142,7 +185,8 @@
         if (step < n) el.classList.add('done');
         if (step === n) el.classList.add('active');
       });
-      if (n === 3) startDeviceCheck();
+      if (n === 3) startIdVerificationCamera();
+      if (n === 4) startDeviceCheck();
     }
 
     async function createStudent() {
@@ -193,22 +237,137 @@
       }
     }
 
+    // --- Step 3: Identity verification ---
+
+    async function loadImageFromFile(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    document.getElementById('id-photo').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      const statusEl = document.getElementById('id-photo-status');
+      const preview = document.getElementById('id-photo-preview');
+      idEmbedding = null;
+      document.getElementById('id-continue-btn').disabled = true;
+      identityVerified = false;
+      if (!file) return;
+
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = 'block';
+      statusEl.textContent = 'Reading face from ID photo…';
+
+      try {
+        await ensureModelsLoaded();
+        const img = await loadImageFromFile(file);
+        const detection = await faceapi
+          .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 }))
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (!detection) {
+          statusEl.textContent = 'No clear face found in that photo — try a clearer, front-facing ID photo.';
+          statusEl.style.color = 'var(--risk)';
+          return;
+        }
+
+        idEmbedding = Array.from(detection.descriptor);
+        statusEl.textContent = 'Face read from ID. Now confirm it\'s you with the live camera below.';
+        statusEl.style.color = 'var(--verified)';
+        document.getElementById('live-verify-block').style.display = 'block';
+        startIdVerificationCamera();
+      } catch (err) {
+        statusEl.textContent = 'Could not process that photo: ' + err.message;
+        statusEl.style.color = 'var(--risk)';
+      }
+    });
+
+    let idCameraStarted = false;
+    async function startIdVerificationCamera() {
+      if (idCameraStarted || !idEmbedding) return;
+      idCameraStarted = true;
+      try {
+        await ensureModelsLoaded();
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        document.getElementById('id-video').srcObject = stream;
+      } catch (err) {
+        document.getElementById('id-verify-status').textContent = 'Camera unavailable: ' + err.message;
+        document.getElementById('id-verify-status').style.color = 'var(--risk)';
+        idCameraStarted = false;
+      }
+    }
+
+    async function runIdentityVerification() {
+      const statusEl = document.getElementById('id-verify-status');
+      const msg = document.getElementById('msg-3');
+      if (!idEmbedding) { statusEl.textContent = 'Upload an ID photo first.'; return; }
+
+      statusEl.textContent = 'Checking your face against the ID photo…';
+      statusEl.style.color = 'var(--text-soft)';
+
+      const video = document.getElementById('id-video');
+      // scoreThreshold + detectSingleFace: requires one confident, well-formed
+      // face — this is what prevents the earlier bug where a covered lens
+      // or blurry close-up got misread as "face detected OK".
+      const detection = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 }))
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        statusEl.textContent = 'No confident face detected in the camera — center your face and try again.';
+        statusEl.style.color = 'var(--risk)';
+        return;
+      }
+
+      const liveEmbedding = Array.from(detection.descriptor);
+
+      const res = await fetch(`/api/students/${studentId}/id-verification`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idEmbedding, liveEmbedding })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.matched) {
+        statusEl.textContent = 'Identity verified — live face matches your ID.';
+        statusEl.style.color = 'var(--verified)';
+        identityVerified = true;
+        document.getElementById('id-continue-btn').disabled = false;
+        msg.textContent = '';
+      } else {
+        identityVerified = false;
+        document.getElementById('id-continue-btn').disabled = true;
+        statusEl.textContent = '';
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Verification failed.';
+      }
+    }
+
     async function startDeviceCheck() {
       const noWebcam = document.getElementById('no-webcam').checked;
       const statusEl = document.getElementById('device-status');
       if (noWebcam) { deviceCheckPassed = true; return; }
 
       try {
-        await faceapi.nets.tinyFaceDetector.loadFromUri(
-          'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights'
-        );
+        await ensureModelsLoaded();
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         const video = document.getElementById('video');
         video.srcObject = stream;
         statusEl.textContent = 'Checking for a face…';
 
         const check = setInterval(async () => {
-          const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
+          // scoreThreshold filters out low-confidence guesses — the default
+          // detector can false-positive on close-up skin-toned textures
+          // (e.g. a covered lens), so we require a genuinely confident match.
+          const detections = (await faceapi.detectAllFaces(
+            video,
+            new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 })
+          )).filter(d => d.score >= 0.6);
           if (detections.length === 1) {
             statusEl.textContent = 'Camera and face detection working.';
             statusEl.style.color = 'var(--verified)';
@@ -228,7 +387,7 @@
     }
 
     async function confirmDeviceCheck() {
-      const msg = document.getElementById('msg-3');
+      const msg = document.getElementById('msg-4');
       const res = await fetch(`/api/students/${studentId}/device-check`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -238,7 +397,7 @@
       if (res.ok) {
         msg.textContent = '';
         populateReview();
-        goToStep(4);
+        goToStep(5);
       } else {
         const data = await res.json();
         msg.style.color = '#c1443b';
@@ -253,6 +412,7 @@
 
       document.getElementById('rev-name').textContent = studentName;
       document.getElementById('rev-email').textContent = document.getElementById('email').value.trim();
+      document.getElementById('rev-identity').textContent = identityVerified ? 'Verified against ID photo' : 'Not verified';
       document.getElementById('rev-webcam').textContent = hasWebcam ? 'Active' : 'Disabled (no-webcam accommodation)';
       document.getElementById('rev-sensitivity').textContent = reducedSensitivity ? 'Reduced (30% more lenient)' : 'Standard';
       document.getElementById('rev-notes').textContent = notes || 'None';
@@ -260,7 +420,7 @@
     }
 
     async function finishOnboarding() {
-      const msg = document.getElementById('msg-4');
+      const msg = document.getElementById('msg-5');
       if (!document.getElementById('consent').checked) {
         msg.style.color = '#c1443b';
         msg.textContent = 'Please confirm the checkbox to continue.';

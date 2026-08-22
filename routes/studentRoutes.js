@@ -1,6 +1,7 @@
 const express = require("express");
 const Student = require("../models/Student");
 const requireAdmin = require("../middleware/auth");
+const { euclideanDistance, LIVE_MATCH_THRESHOLD, DUPLICATE_THRESHOLD } = require("../utils/faceMatch");
 
 const router = express.Router();
 
@@ -73,6 +74,64 @@ router.patch("/students/:id/onboarding-complete", async (req, res) => {
 
   await student.save();
   res.json(student);
+});
+
+// Public: identity verification — the browser computes face descriptors
+// client-side (face-api.js) from the uploaded ID photo and a live camera
+// capture, and sends both here. The server independently:
+//   1. Confirms the live face actually matches the ID photo (not just
+//      trusting a client-side "looks fine" claim).
+//   2. Confirms this ID photo doesn't already belong to another student
+//      account (catches the same person re-registering under a new email).
+// Nothing is persisted unless both checks pass.
+router.patch("/students/:id/id-verification", async (req, res) => {
+  const { idEmbedding, liveEmbedding, idPhotoDataUrl } = req.body;
+
+  if (!Array.isArray(idEmbedding) || idEmbedding.length !== 128) {
+    return res.status(400).json({ message: "A valid ID photo face embedding is required" });
+  }
+  if (!Array.isArray(liveEmbedding) || liveEmbedding.length !== 128) {
+    return res.status(400).json({ message: "A valid live camera face embedding is required" });
+  }
+
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(404).json({ message: "Student not found" });
+
+  // 1. Live face must match the ID photo
+  const liveDistance = euclideanDistance(idEmbedding, liveEmbedding);
+  if (liveDistance > LIVE_MATCH_THRESHOLD) {
+    return res.status(422).json({
+      message: "Live camera face does not match the uploaded ID photo",
+      distance: liveDistance,
+      matched: false,
+    });
+  }
+
+  // 2. This ID must not already be enrolled under a different student
+  const others = await Student.find({
+    _id: { $ne: student._id },
+    "idVerification.faceEmbedding": { $ne: null },
+  }).select("_id name email idVerification.faceEmbedding");
+
+  const duplicate = others.find(
+    (o) => euclideanDistance(idEmbedding, o.idVerification.faceEmbedding) < DUPLICATE_THRESHOLD
+  );
+  if (duplicate) {
+    return res.status(409).json({
+      message: "This ID photo appears to match an already-registered student account",
+      matched: false,
+    });
+  }
+
+  student.idVerification = {
+    idPhotoDataUrl: idPhotoDataUrl || null,
+    faceEmbedding: idEmbedding,
+    verified: true,
+    verifiedAt: new Date(),
+  };
+  await student.save();
+
+  res.json({ message: "Identity verified", matched: true, distance: liveDistance, student });
 });
 
 router.get("/search/:name", async (req, res) => {

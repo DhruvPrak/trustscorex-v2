@@ -86,7 +86,10 @@
 
     function accommodationBadges(s) {
       const prefs = s.preferences || {};
+      const idv = s.idVerification || {};
       const badges = [];
+      if (idv.verified) badges.push('<span class="badge status-clean">ID verified</span>');
+      else badges.push('<span class="badge status-warning">ID not verified</span>');
       if (!prefs.hasWebcam) badges.push('<span class="badge status-warning">No webcam</span>');
       if (prefs.reducedSensitivity) badges.push('<span class="badge status-warning">Reduced sensitivity</span>');
       if (prefs.accessibilityNotes) badges.push('<span class="badge status-clean" title="' + prefs.accessibilityNotes.replace(/"/g, '&quot;') + '">Notes</span>');

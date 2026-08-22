@@ -179,10 +179,14 @@
         faceStatus.textContent = 'Model loaded — monitoring face presence every 4s.';
 
         setInterval(async () => {
-          const detections = await faceapi.detectAllFaces(
+          // scoreThreshold filters out low-confidence guesses — same fix as
+          // the onboarding device check, so a covered/obstructed lens
+          // during the exam correctly reads as "no face" instead of a
+          // false-positive "OK".
+          const detections = (await faceapi.detectAllFaces(
             video,
-            new faceapi.TinyFaceDetectorOptions()
-          );
+            new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 })
+          )).filter(d => d.score >= 0.6);
           if (detections.length === 0) {
             noFaceStreak++;
             faceStatus.textContent = 'No face detected.';
