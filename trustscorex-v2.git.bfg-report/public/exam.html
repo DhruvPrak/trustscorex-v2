@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TrustScoreX — Monitored Exam Session</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/css/common.css">
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<!-- Used only for the suspicious-object check (phone/book in frame) during
+     the exam. face-api.js bundles its own internal tfjs-core, so this
+     separate @tensorflow/tfjs + coco-ssd pair doesn't conflict with it. -->
+<script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+</head>
+<body>
+  <div class="nav">
+    <div class="nav-brand"><span class="mark">TX</span> TrustScoreX</div>
+    <div class="nav-links">
+      <a href="/index.html">Register</a>
+      <a href="/login.html">Log In</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/leaderboard.html">Leaderboard</a>
+      <a href="/risk.html">Risk Monitor</a>
+      <a href="/admin.html">Admin</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:24px; flex-wrap:wrap;">
+      <div>
+        <p class="eyebrow" id="student-name">Loading student…</p>
+        <h1 class="title">Monitored exam session</h1>
+      </div>
+      <div class="card-dark" style="padding:14px 20px; text-align:center; border-color: var(--gold); min-width:150px;">
+        <div style="font-family: var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color: var(--text-soft);">Time remaining</div>
+        <div id="exam-timer" style="font-family: var(--font-display); font-size:32px; font-weight:600; color: var(--gold-bright);">5:00</div>
+      </div>
+    </div>
+    <p class="lede">
+      Camera-based face detection and tab-focus tracking are running below.
+      Switch tabs, look away, or try to copy text — your trust score updates
+      in real time from what's actually detected, not a random number. Every
+      suspicious action costs 15 trust points; your session ends automatically
+      if your score drops to 15 or below, or when the timer above runs out.
+    </p>
+
+    <div id="personalization-banner" class="card-dark" style="display:none; margin-bottom:24px; border-color: var(--gold);">
+      <strong style="font-family: var(--font-mono); font-size:12px; text-transform:uppercase; letter-spacing:0.04em; color: var(--gold-bright);">Personalized for this session</strong>
+      <ul id="personalization-list" style="margin:10px 0 0; padding-left:18px; font-size:13px; color: var(--text-soft); line-height:1.6;"></ul>
+    </div>
+
+    <div style="display:flex; gap:24px; flex-wrap:wrap;">
+      <div class="card" style="flex: 1; min-width: 280px;" id="webcam-panel">
+        <video id="video" autoplay muted playsinline style="width:100%; border-radius:4px; background:#000;"></video>
+        <p style="font-size:12px; font-family: var(--font-mono); color:#6b6450; margin-top:10px;" id="face-status">
+          Waiting for camera + models…
+        </p>
+      </div>
+
+      <div class="card-dark" style="flex: 1; min-width: 280px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;">
+        <div class="seal status-clean" id="seal">
+          <div class="score" id="score-num">100</div>
+          <div class="label">Trust Score</div>
+        </div>
+        <div id="status-text" style="font-family: var(--font-mono); font-size:13px;">CLEAN</div>
+
+<div style="width:100%; max-width:280px;">
+  <div class="trust-bar">
+    <div class="trust-bar-zone" style="background:var(--risk); flex:50;"></div>
+    <div class="trust-bar-zone" style="background:var(--warning); flex:25;"></div>
+    <div class="trust-bar-zone" style="background:var(--verified); flex:25;"></div>
+    <div class="trust-bar-marker" id="bar-marker"></div>
+  </div>
+  <div class="trust-bar-labels">
+    <span style="color:var(--risk);">High risk</span>
+    <span style="color:var(--warning);">Warning</span>
+    <span style="color:var(--verified);">Clean</span>
+  </div>
+</div>
+</div>
+</div>
+
+    <div class="card-dark" style="margin-top:24px;">
+      <h3 style="margin-top:0; font-family: var(--font-display);">Live event log</h3>
+      <div id="log" style="font-family: var(--font-mono); font-size:12px; color: var(--text-soft); max-height:200px; overflow-y:auto;">
+        No events yet — behaving well.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const studentId = params.get('studentId');
+    const name = params.get('name') || 'Student';
+    document.getElementById('student-name').textContent = `Exam session — ${name}`;
+
+    if (!studentId) {
+      document.body.insertAdjacentHTML('afterbegin',
+        '<div class="toast">No student selected. Register first from the home page.</div>');
+    }
+
+    // Fetches this student's saved preferences and adapts the session:
+    // no-webcam students skip camera/face monitoring entirely, and a
+    // banner shows what's active/adapted so it's never a silent change.
+    let studentPrefs = { hasWebcam: true, reducedSensitivity: false };
+    // The 128-d descriptor captured from this student's ID photo at
+    // registration (see index.html step 3). Comparing every live frame
+    // against this — not just checking "a face is present" — is what
+    // catches the camera being handed to someone else mid-exam.
+    let registeredDescriptor = null;
+
+    // Returns true if the session is clear to run, false if the student
+    // was already terminated (score threshold or a previous timeout) and
+    // this page should refuse to start monitoring at all.
+    async function initPersonalizedSession() {
+      if (!studentId) return false;
+      try {
+        const res = await fetch(`/api/students/${studentId}`);
+        if (!res.ok) return false;
+        const student = await res.json();
+
+        if (student.sessionTerminated) {
+          const reason = student.terminationReason === 'time_expired' ? 'time_expired' : 'trust_score';
+          endExamSession(reason, true);
+          return false;
+        }
+
+        studentPrefs = student.preferences || studentPrefs;
+        if (Array.isArray(student.idVerification?.faceEmbedding)) {
+          registeredDescriptor = student.idVerification.faceEmbedding;
+        }
+
+        const items = [];
+        if (!studentPrefs.hasWebcam) {
+          items.push('Camera and face-presence monitoring: disabled (no-webcam accommodation)');
+          document.getElementById('webcam-panel').style.display = 'none';
+        } else {
+          items.push('Camera and face-presence monitoring: active');
+        }
+        if (studentPrefs.reducedSensitivity) {
+          items.push('Score sensitivity: reduced — flagged events count for less');
+        }
+        if (studentPrefs.accessibilityNotes) {
+          items.push(`Notes on file: ${studentPrefs.accessibilityNotes}`);
+        }
+        if (studentPrefs.hasWebcam && !registeredDescriptor) {
+          items.push('No ID verification on file — live identity matching will be skipped, only presence/multi-face/blur checks run');
+        }
+
+        const banner = document.getElementById('personalization-banner');
+        const list = document.getElementById('personalization-list');
+        list.innerHTML = items.map(i => `<li>${i}</li>`).join('');
+        banner.style.display = 'block';
+        return true;
+      } catch (e) {
+        return true; /* offline - fall back to default (webcam on) */
+      }
+    }
+
+    const logEl = document.getElementById('log');
+    const sealEl = document.getElementById('seal');
+    const scoreEl = document.getElementById('score-num');
+    const statusEl = document.getElementById('status-text');
+    const timerEl = document.getElementById('exam-timer');
+
+    // Timestamped log line — full date + time, not just the clock, since
+    // this doubles as the readable action-history trail for this session
+    // (the authoritative copy lives in the database via ExamEvent.createdAt).
+    function logLine(text) {
+      const line = document.createElement('div');
+      const now = new Date();
+      line.textContent = `[${now.toLocaleDateString()} ${now.toLocaleTimeString()}] ${text}`;
+      logEl.prepend(line);
+    }
+
+    function applyStatus(status) {
+      sealEl.className = 'seal status-' + status;
+      statusEl.textContent = status.replace('_', ' ').toUpperCase();
+    }
+
+    let sessionEnded = false;
+    let activeStream = null;
+    let examTimerInterval = null;
+
+    function stopAllMonitoring() {
+      if (activeStream) {
+        activeStream.getTracks().forEach(t => t.stop());
+        activeStream = null;
+      }
+      if (examTimerInterval) {
+        clearInterval(examTimerInterval);
+        examTimerInterval = null;
+      }
+    }
+
+    // Ends the session client-side (stops camera + timers, shows a message,
+    // sends the student home) and optionally tells the server why, so the
+    // termination is timestamped and the student is blocked from logging
+    // back in. `alreadyTerminated` skips the redundant server call when
+    // the server already told us the session is over.
+    function endExamSession(reason, alreadyTerminated) {
+      if (sessionEnded) return;
+      sessionEnded = true;
+      stopAllMonitoring();
+
+      const text = reason === 'time_expired'
+        ? "Time's up — your 5-minute exam session has ended. Returning to the home screen…"
+        : 'Your trust score fell to or below the allowed limit — your session has been terminated. Returning to the home screen…';
+
+      document.body.insertAdjacentHTML('afterbegin', `<div class="toast">${text}</div>`);
+      logLine(text);
+
+      const goHome = () => {
+        window.location.href = `/index.html?ended=${reason}`;
+      };
+
+      if (alreadyTerminated || !studentId) {
+        setTimeout(goHome, 2500);
+        return;
+      }
+
+      fetch('/api/exam/terminate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId, reason })
+      }).finally(() => setTimeout(goHome, 2500));
+    }
+
+    async function sendEvent(type, meta = {}) {
+      if (!studentId || sessionEnded) return;
+      try {
+        const res = await fetch('/api/exam/event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentId, type, meta })
+        });
+        const data = await res.json();
+        if (res.ok || res.status === 403) {
+          scoreEl.textContent = data.newScore;
+          applyStatus(data.status || 'high_risk');
+          logLine(`${type.replace(/_/g, ' ')} (-15) → score ${data.newScore}`);
+        }
+        if (data.terminated) {
+          endExamSession('trust_score', true);
+        }
+      } catch (e) { /* offline - ignore for demo */ }
+    }
+
+    // 5-minute session timer — starts once monitoring actually begins
+    // (after all verification/setup is done and the final review has
+    // been confirmed) and auto-ends the session on expiry.
+    function startExamTimer(totalSeconds = 5 * 60) {
+      let remaining = totalSeconds;
+      const render = () => {
+        const m = Math.floor(remaining / 60);
+        const s = remaining % 60;
+        timerEl.textContent = `${m}:${String(s).padStart(2, '0')}`;
+        if (remaining <= 30) timerEl.style.color = 'var(--risk)';
+        else if (remaining <= 60) timerEl.style.color = 'var(--warning)';
+      };
+      render();
+      examTimerInterval = setInterval(() => {
+        remaining--;
+        render();
+        if (remaining <= 0) {
+          clearInterval(examTimerInterval);
+          examTimerInterval = null;
+          endExamSession('time_expired', false);
+        }
+      }, 1000);
+    }
+
+    // --- Tab / window focus tracking ---
+    let lastHidden = 0;
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        lastHidden = Date.now();
+      } else {
+        sendEvent('tab_switch', { awayMs: Date.now() - lastHidden });
+      }
+    });
+    window.addEventListener('blur', () => sendEvent('window_blur'));
+
+    // --- Copy / paste / right-click ---
+    document.addEventListener('copy', () => sendEvent('copy_attempt'));
+    document.addEventListener('paste', () => sendEvent('paste_attempt'));
+    document.addEventListener('contextmenu', () => sendEvent('right_click'));
+
+    // --- Face detection via face-api.js (real client-side AI) ---
+    // Runs every second, checking four things per frame:
+    //   1. no face (debounced — 2 consecutive misses, ~2s, so a blink or
+    //      brief look-away never fires this on its own)
+    //   2. more than one face (fires immediately — rarely a false positive,
+    //      and this is the actual "handed the camera to someone else"
+    //      signature you get when a second person leans into frame)
+    //   3. face_mismatch — the live face doesn't match the descriptor
+    //      captured from the ID photo at registration (debounced, 4
+    //      consecutive misses ~4s, then re-fires every ~5s while it stays
+    //      mismatched) — this is what catches student A handing the whole
+    //      camera/laptop to student B
+    //   4. camera_blurred_or_covered — Laplacian-variance sharpness check
+    //      on the raw frame (debounced 3 consecutive misses ~3s, since
+    //      blur is more prone to one-off false positives than the others)
+    // A 5th, lighter check for suspicious objects (phone/book in frame)
+    // runs every 3rd tick via coco-ssd, since that model is heavier.
+    const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+    const faceStatus = document.getElementById('face-status');
+    // NOTE: this is intentionally looser than utils/faceMatch.js's
+    // LIVE_MATCH_THRESHOLD (0.55, used for the one-off registration
+    // decision). 0.6 is face-api.js's own documented "same person"
+    // default. The registration check gets one posed, straight-at-camera
+    // frame and can afford to be strict; this check runs every second
+    // through natural exam behavior — looking down at paper, head turns,
+    // shifting light — which genuinely increases descriptor distance for
+    // the *same* person. Keeping 0.55 here was producing false-positive
+    // face_mismatch events for legitimate students mid-exam even though
+    // the one-shot device check (same threshold, one ideal frame) passed
+    // cleanly. If you tighten this back up, expect more false positives
+    // during normal exam behavior, not just from real impersonation.
+    const MATCH_THRESHOLD = 0.6;
+    const BLUR_VARIANCE_THRESHOLD = 40;
+    // Debounce (ticks of no-detection before the first event fires) and
+    // repeat interval (ticks between re-fires while the condition stays
+    // sustained) for each check — tuned so a single bad frame never costs
+    // points, but a genuinely sustained violation keeps costing points
+    // instead of a one-time hit that then goes silent for the rest of
+    // the exam.
+    const DEBOUNCE = { noFace: 2, mismatch: 4, blur: 3 };
+    const REPEAT_EVERY = { noFace: 5, mismatch: 5, blur: 10 };
+    const MULTI_FACE_DEBOUNCE = 2; // consecutive ticks before firing, avoids a one-frame glitch
+    const MULTI_FACE_COOLDOWN_MS = 5000; // then at most once per 5s while sustained
+    const streaks = { noFace: 0, mismatch: 0, blur: 0, multiFace: 0 };
+    let lastMultiFaceFire = 0;
+    let tick = 0;
+    let cocoModel = null;
+
+    // Reused offscreen canvas for the blur check, sized small on purpose —
+    // sharpness only needs a coarse sample, not full resolution, and this
+    // keeps a per-second synchronous canvas read cheap.
+    const blurCanvas = document.createElement('canvas');
+    blurCanvas.width = 160;
+    blurCanvas.height = 120;
+    const blurCtx = blurCanvas.getContext('2d', { willReadFrequently: true });
+
+    function euclideanDistance(a, b) {
+      let sum = 0;
+      for (let i = 0; i < a.length; i++) {
+        const diff = a[i] - b[i];
+        sum += diff * diff;
+      }
+      return Math.sqrt(sum);
+    }
+
+    // Classic Laplacian-variance sharpness measure: low variance means the
+    // frame is blurry, out of focus, or the lens is covered/obstructed.
+    // Catches the "wave a hand over the camera" or "point it at the
+    // ceiling" tricks that a plain no-face check can miss if a low-quality
+    // face-shaped blob still barely passes detection.
+    function isFrameBlurry(video) {
+      const w = blurCanvas.width, h = blurCanvas.height;
+      blurCtx.drawImage(video, 0, 0, w, h);
+      const { data } = blurCtx.getImageData(0, 0, w, h);
+
+      const gray = new Float32Array(w * h);
+      for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+        gray[p] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      }
+
+      let sum = 0, sumSq = 0, count = 0;
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const idx = y * w + x;
+          const lap = 4 * gray[idx] - gray[idx - 1] - gray[idx + 1] - gray[idx - w] - gray[idx + w];
+          sum += lap;
+          sumSq += lap * lap;
+          count++;
+        }
+      }
+      const mean = sum / count;
+      const variance = sumSq / count - mean * mean;
+      return variance < BLUR_VARIANCE_THRESHOLD;
+    }
+
+    // coco-ssd labels worth flagging, and the event/severity each maps to
+    // (see utils/trustScore.js — all currently share suspicious_object_detected).
+    const SUSPICIOUS_OBJECT_LABELS = new Set(['cell phone', 'book', 'laptop']);
+    const OBJECT_MIN_CONFIDENCE = 0.6;
+    const lastObjectFire = {};
+    const OBJECT_REPEAT_SUPPRESS_MS = 10000; // don't spam the same object more than once per 10s
+
+    async function checkSuspiciousObjects(video) {
+      if (!cocoModel) return;
+      try {
+        const predictions = await cocoModel.detect(video);
+        const now = Date.now();
+        for (const pred of predictions) {
+          if (!SUSPICIOUS_OBJECT_LABELS.has(pred.class)) continue;
+          if (pred.score < OBJECT_MIN_CONFIDENCE) continue;
+          if (now - (lastObjectFire[pred.class] || 0) < OBJECT_REPEAT_SUPPRESS_MS) continue;
+          lastObjectFire[pred.class] = now;
+          sendEvent('suspicious_object_detected', { label: pred.class, confidence: Number(pred.score.toFixed(2)) });
+        }
+      } catch (e) { /* object model optional — never block the main loop on it */ }
+    }
+
+    async function startFaceMonitoring() {
+      try {
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        ]);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        activeStream = stream;
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+
+        // coco-ssd is optional polish — if the CDN script didn't load or
+        // the model fails, everything else keeps working.
+        if (typeof cocoSsd !== 'undefined') {
+          try { cocoModel = await cocoSsd.load(); } catch (e) { cocoModel = null; }
+        }
+
+        faceStatus.textContent = registeredDescriptor
+          ? 'Models loaded — verifying identity every second.'
+          : 'Models loaded — monitoring presence every second (no ID descriptor to match against).';
+
+        const monitorInterval = setInterval(async () => {
+          if (sessionEnded) { clearInterval(monitorInterval); return; }
+          tick++;
+
+          if (isFrameBlurry(video)) {
+            streaks.blur++;
+            // Fire at the debounce point, then keep re-firing on a fixed
+            // interval while it stays blurry/covered instead of only ever
+            // costing points once for the whole exam.
+            if (
+              streaks.blur === DEBOUNCE.blur ||
+              (streaks.blur > DEBOUNCE.blur && (streaks.blur - DEBOUNCE.blur) % REPEAT_EVERY.blur === 0)
+            ) {
+              sendEvent('camera_blurred_or_covered');
+            }
+          } else {
+            streaks.blur = 0;
+          }
+
+          // scoreThreshold filters out low-confidence guesses — same fix as
+          // the onboarding device check, so a covered/obstructed lens
+          // correctly reads as "no face" instead of a false-positive "OK".
+          const detections = await faceapi
+            .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 }))
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+          const confident = detections.filter(d => d.detection.score >= 0.6);
+
+          if (confident.length === 0) {
+            streaks.noFace++;
+            streaks.mismatch = 0;
+            streaks.multiFace = 0;
+            faceStatus.textContent = 'No face detected.';
+            // Debounce brief look-aways/blinks, then keep re-firing on an
+            // interval while the student stays out of frame — leaving the
+            // room permanently should keep costing points, not just once.
+            if (
+              streaks.noFace === DEBOUNCE.noFace ||
+              (streaks.noFace > DEBOUNCE.noFace && (streaks.noFace - DEBOUNCE.noFace) % REPEAT_EVERY.noFace === 0)
+            ) {
+              sendEvent('no_face_detected');
+            }
+          } else if (confident.length > 1) {
+            streaks.multiFace++;
+            streaks.noFace = 0;
+            streaks.mismatch = 0;
+            faceStatus.textContent = `${confident.length} faces detected.`;
+            // Require 2 consecutive confident ticks (avoids a one-frame
+            // glitch misreading a stray reflection/photo as a second
+            // person), then at most one event per 5s while it persists —
+            // without this a sustained second face would fire every
+            // single second and burn the whole trust score in seconds.
+            const now = Date.now();
+            if (streaks.multiFace >= MULTI_FACE_DEBOUNCE && now - lastMultiFaceFire >= MULTI_FACE_COOLDOWN_MS) {
+              lastMultiFaceFire = now;
+              sendEvent('multiple_faces_detected', { count: confident.length });
+            }
+          } else {
+            streaks.noFace = 0;
+            streaks.multiFace = 0;
+            if (registeredDescriptor) {
+              const distance = euclideanDistance(confident[0].descriptor, registeredDescriptor);
+              if (distance >= MATCH_THRESHOLD) {
+                streaks.mismatch++;
+                faceStatus.textContent = 'Face does not match registered ID.';
+                // Fire at 4 consecutive misses (~4s — wider than no-face's
+                // 2s since natural head movement can occasionally push a
+                // couple of frames over threshold even for the right
+                // person). Then keep re-firing every 5s while it stays
+                // mismatched, instead of firing once and going silent —
+                // a sustained impersonation should keep costing score.
+                if (
+                  streaks.mismatch === DEBOUNCE.mismatch ||
+                  (streaks.mismatch > DEBOUNCE.mismatch && (streaks.mismatch - DEBOUNCE.mismatch) % REPEAT_EVERY.mismatch === 0)
+                ) {
+                  sendEvent('face_mismatch', { distance: Number(distance.toFixed(3)) });
+                }
+              } else {
+                streaks.mismatch = 0;
+                faceStatus.textContent = 'Face detected — identity verified.';
+              }
+            } else {
+              faceStatus.textContent = 'Face detected — OK (no ID descriptor to verify against).';
+            }
+          }
+
+          if (tick % 3 === 0) checkSuspiciousObjects(video);
+        }, 1000);
+      } catch (err) {
+        faceStatus.textContent = 'Camera/model unavailable — face monitoring skipped (' + err.message + ').';
+      }
+    }
+
+    window.addEventListener('load', async () => {
+      const clearToStart = await initPersonalizedSession();
+      if (!clearToStart || sessionEnded) return; // already terminated — redirect is in flight
+
+      startExamTimer(5 * 60);
+
+      if (studentPrefs.hasWebcam) {
+        startFaceMonitoring();
+      } else {
+        faceStatus.textContent = 'Face monitoring skipped — no-webcam accommodation on file.';
+      }
+    });
+  </script>
+</body>
+</html>

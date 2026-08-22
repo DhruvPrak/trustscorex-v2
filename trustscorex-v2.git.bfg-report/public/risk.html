@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TrustScoreX — Risk Monitor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+  <div class="nav">
+    <div class="nav-brand"><span class="mark">TX</span> TrustScoreX</div>
+    <div class="nav-links">
+      <a href="/index.html">Register</a>
+      <a href="/login.html">Log In</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/leaderboard.html">Leaderboard</a>
+      <a href="/risk.html" class="active">Risk Monitor</a>
+      <a href="/admin.html">Admin</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <p class="eyebrow" style="color:var(--risk);">Flagged</p>
+    <h1 class="title">Students under 70</h1>
+    <p class="lede">These students have accumulated enough flagged behaviour to warrant a manual review.</p>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>Seal</th><th>Name</th><th>Email</th><th>Score</th><th>Status</th><th>Session</th><th>Last activity</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    fetch('/api/risk-students').then(r => r.json()).then(students => {
+      document.getElementById('rows').innerHTML = students.map(s => `
+        <tr>
+          <td><div class="seal seal-sm status-${s.status}"><div class="score">${s.trustScore}</div></div></td>
+          <td>${s.name}</td>
+          <td>${s.email}</td>
+          <td style="font-family:var(--font-mono);">${s.trustScore}</td>
+          <td><span class="badge status-${s.status}">${s.status.replace('_',' ')}</span></td>
+          <td>${s.sessionTerminated ? `<span class="badge status-high_risk">${s.terminationReason === 'time_expired' ? 'Timed out' : 'Score limit'}</span>` : '<span class="badge status-clean">Active</span>'}</td>
+          <td style="font-family:var(--font-mono); font-size:12px;">${s.lastActivityAt ? new Date(s.lastActivityAt).toLocaleDateString() + ' ' + new Date(s.lastActivityAt).toLocaleTimeString() : '—'}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="7">No at-risk students right now.</td></tr>';
+    });
+  </script>
+</body>
+</html>

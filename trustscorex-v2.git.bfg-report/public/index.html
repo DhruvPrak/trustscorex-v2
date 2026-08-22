@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TrustScoreX — Exam Integrity Monitoring</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/css/common.css">
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+<body>
+  <div class="nav">
+    <div class="nav-brand"><span class="mark">TX</span> TrustScoreX</div>
+    <div class="nav-links">
+      <a href="/index.html" class="active">Register</a>
+      <a href="/login.html">Log In</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/leaderboard.html">Leaderboard</a>
+      <a href="/risk.html">Risk Monitor</a>
+      <a href="/admin.html">Admin</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div id="return-banner" style="display:none; margin-bottom:24px; padding:16px 18px; background:rgba(193,68,59,0.12); border:1px solid var(--risk); border-radius:4px; font-size:14px; color:var(--parchment);"></div>
+
+    <p class="eyebrow">Exam Integrity Platform</p>
+    <h1 class="title">Every score, earned in<br>full view.</h1>
+    <p class="lede">
+      TrustScoreX watches for the signals that matter during an exam —
+      tab switching, missing faces, copy attempts — and turns them into
+      a single trust score, updated live. This short setup makes sure
+      the monitoring actually fits your device and needs before the exam starts.
+    </p>
+
+    <div class="stepper" id="stepper">
+      <div class="step" data-step="1"><div class="dot">1</div><div class="label">Basic info</div></div>
+      <div class="connector"></div>
+      <div class="step" data-step="2"><div class="dot">2</div><div class="label">Accommodations</div></div>
+      <div class="connector"></div>
+      <div class="step" data-step="3"><div class="dot">3</div><div class="label">Identity check</div></div>
+      <div class="connector"></div>
+      <div class="step" data-step="4"><div class="dot">4</div><div class="label">Device check</div></div>
+      <div class="connector"></div>
+      <div class="step" data-step="5"><div class="dot">5</div><div class="label">Review</div></div>
+    </div>
+
+    <!-- Step 1: Basic info -->
+    <div class="card" style="max-width: 460px;" id="step-1">
+      <label>Full name</label>
+      <input id="name" placeholder="e.g. Aditya Verma" />
+      <label>Email</label>
+      <input id="email" type="email" placeholder="you@college.edu" />
+      <button class="btn-gold" onclick="createStudent()" style="width:100%;">Continue</button>
+      <div id="msg-1" style="margin-top:14px; font-size:13px;"></div>
+    </div>
+
+    <!-- Step 2: Accommodations -->
+    <div class="card" style="max-width: 460px; display:none;" id="step-2">
+      <p style="margin-top:0; font-size:14px; color:#6b6450;">Tell us about your setup so the exam monitor can adapt to it — none of this affects your starting score.</p>
+
+      <div class="check-row">
+        <input type="checkbox" id="no-webcam" onchange="onCameraNotWorkingToggled()" />
+        <div class="check-text">
+          <strong>My camera is not working</strong>
+          <span>A working camera is required to take this exam. Ticking this will not let you continue — fix your camera, then untick this box.</span>
+        </div>
+      </div>
+      <div class="check-row">
+        <input type="checkbox" id="reduced-sensitivity" />
+        <div class="check-text">
+          <strong>Request reduced monitoring sensitivity</strong>
+          <span>For connectivity issues, assistive tech, or anxiety around strict monitoring. Softens how quickly flagged events affect your score.</span>
+        </div>
+      </div>
+
+      <label style="margin-top:6px;">Accessibility notes (optional)</label>
+      <input id="notes" placeholder="e.g. using a screen reader, unstable connection" />
+
+      <div id="camera-block-notice" style="display:none; padding:14px; background:rgba(193,68,59,0.12); border:1px solid var(--risk); color:#8a2a22; border-radius:3px; font-size:13px; margin-bottom:16px;">
+        You can't continue with a non-working camera — this exam requires face monitoring. Fix or connect a working webcam, then untick the box above.
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:8px;">
+        <button onclick="goToStep(1)" style="flex:1;">Back</button>
+        <button class="btn-gold" id="step2-continue-btn" onclick="savePreferences()" style="flex:2;">Continue</button>
+      </div>
+      <div id="msg-2" style="margin-top:14px; font-size:13px;"></div>
+    </div>
+
+    <!-- Step 3: Identity verification -->
+    <div class="card" style="max-width: 460px; display:none;" id="step-3">
+      <p style="margin-top:0; font-size:14px; color:#6b6450;">
+        Upload a photo of your student ID, then let us confirm you're the same person with a quick live camera check.
+        This keeps one ID from being used to register multiple accounts.
+      </p>
+
+      <label>ID photo</label>
+      <input type="file" id="id-photo" accept="image/*" />
+      <img id="id-photo-preview" style="display:none; width:100%; border-radius:4px; margin-bottom:14px;" />
+      <p style="font-family: var(--font-mono); font-size:12px; color:#6b6450;" id="id-photo-status">No photo uploaded yet.</p>
+
+      <div id="live-verify-block" style="display:none; margin-top:14px;">
+        <label>Live camera check</label>
+        <video id="id-video" autoplay muted playsinline style="width:100%; border-radius:4px; background:#000; margin-bottom:10px;"></video>
+        <button onclick="runIdentityVerification()" style="width:100%;" id="verify-btn">Verify my identity</button>
+        <p style="font-family: var(--font-mono); font-size:12px; color:#6b6450; margin-top:10px;" id="id-verify-status"></p>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button onclick="goToStep(2)" style="flex:1;">Back</button>
+        <button class="btn-gold" onclick="goToStep(4)" style="flex:2;" id="id-continue-btn" disabled>Continue</button>
+      </div>
+      <div id="msg-3" style="margin-top:14px; font-size:13px;"></div>
+    </div>
+
+    <!-- Step 4: Live device check -->
+    <div class="card" style="max-width: 460px; display:none;" id="step-4">
+      <p style="margin-top:0; font-size:14px; color:#6b6450;" id="device-check-intro">
+        Let's test your camera and face detection now, so any problems surface here — not mid-exam.
+      </p>
+
+      <div id="webcam-check-block">
+        <video id="video" autoplay muted playsinline style="width:100%; border-radius:4px; background:#000; margin-bottom:10px;"></video>
+        <p style="font-family: var(--font-mono); font-size:12px; color:#6b6450;" id="device-status">Loading model…</p>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button onclick="goToStep(3)" style="flex:1;">Back</button>
+        <button class="btn-gold" onclick="confirmDeviceCheck()" style="flex:2;" id="device-continue-btn" disabled>Continue</button>
+      </div>
+      <div id="msg-4" style="margin-top:14px; font-size:13px;"></div>
+    </div>
+
+    <!-- Step 5: Review & consent -->
+    <div class="card" style="max-width: 460px; display:none;" id="step-5">
+      <p style="margin-top:0; font-size:14px; color:#6b6450;">Here's the personalized plan for your exam session.</p>
+
+      <div class="summary-row"><span class="k">Name</span><span class="v" id="rev-name">—</span></div>
+      <div class="summary-row"><span class="k">Email</span><span class="v" id="rev-email">—</span></div>
+      <div class="summary-row"><span class="k">Identity check</span><span class="v" id="rev-identity">—</span></div>
+      <div class="summary-row"><span class="k">Face monitoring</span><span class="v" id="rev-webcam">—</span></div>
+      <div class="summary-row"><span class="k">Sensitivity</span><span class="v" id="rev-sensitivity">—</span></div>
+      <div class="summary-row"><span class="k">Notes</span><span class="v" id="rev-notes">—</span></div>
+      <div class="summary-row"><span class="k">Device check</span><span class="v" id="rev-device">—</span></div>
+
+      <div class="check-row" style="margin-top:10px;">
+        <input type="checkbox" id="consent" />
+        <div class="check-text">
+          <strong>I confirm this reflects my setup</strong>
+          <span>I understand my exam session will run with these personalized settings applied.</span>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:8px;">
+        <button onclick="goToStep(4)" style="flex:1;">Back</button>
+        <button class="btn-gold" onclick="finishOnboarding()" style="flex:2;">Start monitored exam →</button>
+      </div>
+      <div id="msg-5" style="margin-top:14px; font-size:13px;"></div>
+    </div>
+  </div>
+
+  <script>
+    let studentId = null;
+    let studentName = '';
+    let deviceCheckPassed = false;
+    let identityVerified = false;
+    let idEmbedding = null; // 128-d descriptor from the uploaded ID photo
+
+    const FACE_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+    let modelsLoaded = false;
+    async function ensureModelsLoaded() {
+      if (modelsLoaded) return;
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL),
+      ]);
+      modelsLoaded = true;
+    }
+
+    function goToStep(n) {
+      for (let i = 1; i <= 5; i++) {
+        document.getElementById('step-' + i).style.display = (i === n) ? 'block' : 'none';
+      }
+      document.querySelectorAll('#stepper .step').forEach(el => {
+        const step = Number(el.dataset.step);
+        el.classList.remove('active', 'done');
+        if (step < n) el.classList.add('done');
+        if (step === n) el.classList.add('active');
+      });
+      if (n === 3) startIdVerificationCamera();
+      if (n === 4) startDeviceCheck();
+    }
+
+    async function createStudent() {
+      const name = document.getElementById('name').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const msg = document.getElementById('msg-1');
+      if (!name || !email) { msg.textContent = 'Name and email are required.'; msg.style.color = '#c1443b'; return; }
+
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        studentId = data._id;
+        studentName = name;
+        msg.textContent = '';
+        goToStep(2);
+      } else {
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Something went wrong.';
+      }
+    }
+
+    // "My camera is not working" is now a hard blocker, not an accommodation
+    // — while it's ticked, Continue stays disabled and a warning shows.
+    function onCameraNotWorkingToggled() {
+      const notWorking = document.getElementById('no-webcam').checked;
+      document.getElementById('camera-block-notice').style.display = notWorking ? 'block' : 'none';
+      document.getElementById('step2-continue-btn').disabled = notWorking;
+    }
+
+    async function savePreferences() {
+      if (document.getElementById('no-webcam').checked) return; // hard block, see onCameraNotWorkingToggled
+      const hasWebcam = true; // camera is required to reach this point now
+      const reducedSensitivity = document.getElementById('reduced-sensitivity').checked;
+      const accessibilityNotes = document.getElementById('notes').value.trim();
+      const msg = document.getElementById('msg-2');
+
+      const res = await fetch(`/api/students/${studentId}/preferences`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hasWebcam, reducedSensitivity, accessibilityNotes })
+      });
+
+      if (res.ok) {
+        msg.textContent = '';
+        goToStep(3);
+      } else {
+        const data = await res.json();
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Could not save preferences.';
+      }
+    }
+
+    // --- Step 3: Identity verification ---
+
+    async function loadImageFromFile(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    document.getElementById('id-photo').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      const statusEl = document.getElementById('id-photo-status');
+      const preview = document.getElementById('id-photo-preview');
+      idEmbedding = null;
+      document.getElementById('id-continue-btn').disabled = true;
+      identityVerified = false;
+      if (!file) return;
+
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = 'block';
+      statusEl.textContent = 'Reading face from ID photo…';
+
+      try {
+        await ensureModelsLoaded();
+        const img = await loadImageFromFile(file);
+        const detection = await faceapi
+          .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 }))
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (!detection) {
+          statusEl.textContent = 'No clear face found in that photo — try a clearer, front-facing ID photo.';
+          statusEl.style.color = 'var(--risk)';
+          return;
+        }
+
+        idEmbedding = Array.from(detection.descriptor);
+        statusEl.textContent = 'Face read from ID. Now confirm it\'s you with the live camera below.';
+        statusEl.style.color = 'var(--verified)';
+        document.getElementById('live-verify-block').style.display = 'block';
+        startIdVerificationCamera();
+      } catch (err) {
+        statusEl.textContent = 'Could not process that photo: ' + err.message;
+        statusEl.style.color = 'var(--risk)';
+      }
+    });
+
+    let idCameraStarted = false;
+    async function startIdVerificationCamera() {
+      if (idCameraStarted || !idEmbedding) return;
+      idCameraStarted = true;
+      try {
+        await ensureModelsLoaded();
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        document.getElementById('id-video').srcObject = stream;
+      } catch (err) {
+        document.getElementById('id-verify-status').textContent = 'Camera unavailable: ' + err.message;
+        document.getElementById('id-verify-status').style.color = 'var(--risk)';
+        idCameraStarted = false;
+      }
+    }
+
+    async function runIdentityVerification() {
+      const statusEl = document.getElementById('id-verify-status');
+      const msg = document.getElementById('msg-3');
+      if (!idEmbedding) { statusEl.textContent = 'Upload an ID photo first.'; return; }
+
+      statusEl.textContent = 'Checking your face against the ID photo…';
+      statusEl.style.color = 'var(--text-soft)';
+
+      const video = document.getElementById('id-video');
+      // scoreThreshold + detectSingleFace: requires one confident, well-formed
+      // face — this is what prevents the earlier bug where a covered lens
+      // or blurry close-up got misread as "face detected OK".
+      const detection = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 }))
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        statusEl.textContent = 'No confident face detected in the camera — center your face and try again.';
+        statusEl.style.color = 'var(--risk)';
+        return;
+      }
+
+      const liveEmbedding = Array.from(detection.descriptor);
+
+      const res = await fetch(`/api/students/${studentId}/id-verification`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idEmbedding, liveEmbedding })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.matched) {
+        statusEl.textContent = 'Identity verified — live face matches your ID.';
+        statusEl.style.color = 'var(--verified)';
+        identityVerified = true;
+        document.getElementById('id-continue-btn').disabled = false;
+        msg.textContent = '';
+      } else {
+        identityVerified = false;
+        document.getElementById('id-continue-btn').disabled = true;
+        statusEl.textContent = '';
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Verification failed.';
+      }
+    }
+
+    // Same blur measure used in exam.html — a low-variance frame here means
+    // the exam-day camera setup is already bad (dim room, greasy lens,
+    // hand blocking it) before the exam even starts, so it's worth
+    // surfacing now rather than mid-exam.
+    const DEVICE_CHECK_MATCH_THRESHOLD = 0.55; // mirrors utils/faceMatch.js LIVE_MATCH_THRESHOLD
+    const DEVICE_CHECK_BLUR_THRESHOLD = 40;
+    const deviceCheckCanvas = document.createElement('canvas');
+    deviceCheckCanvas.width = 160;
+    deviceCheckCanvas.height = 120;
+    const deviceCheckCtx = deviceCheckCanvas.getContext('2d', { willReadFrequently: true });
+
+    function deviceCheckEuclideanDistance(a, b) {
+      let sum = 0;
+      for (let i = 0; i < a.length; i++) {
+        const diff = a[i] - b[i];
+        sum += diff * diff;
+      }
+      return Math.sqrt(sum);
+    }
+
+    function isDeviceCheckFrameBlurry(video) {
+      const w = deviceCheckCanvas.width, h = deviceCheckCanvas.height;
+      deviceCheckCtx.drawImage(video, 0, 0, w, h);
+      const { data } = deviceCheckCtx.getImageData(0, 0, w, h);
+      const gray = new Float32Array(w * h);
+      for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+        gray[p] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      }
+      let sum = 0, sumSq = 0, count = 0;
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const idx = y * w + x;
+          const lap = 4 * gray[idx] - gray[idx - 1] - gray[idx + 1] - gray[idx - w] - gray[idx + w];
+          sum += lap;
+          sumSq += lap * lap;
+          count++;
+        }
+      }
+      const mean = sum / count;
+      const variance = sumSq / count - mean * mean;
+      return variance < DEVICE_CHECK_BLUR_THRESHOLD;
+    }
+
+    async function startDeviceCheck() {
+      const statusEl = document.getElementById('device-status');
+      const continueBtn = document.getElementById('device-continue-btn');
+      deviceCheckPassed = false;
+      continueBtn.disabled = true;
+
+      try {
+        await ensureModelsLoaded();
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        statusEl.textContent = 'Checking for a face…';
+
+        const check = setInterval(async () => {
+          if (isDeviceCheckFrameBlurry(video)) {
+            statusEl.textContent = 'Camera looks blurry or covered — clean the lens or improve lighting, then try again.';
+            statusEl.style.color = 'var(--warning)';
+            return;
+          }
+
+          // scoreThreshold filters out low-confidence guesses — the default
+          // detector can false-positive on close-up skin-toned textures
+          // (e.g. a covered lens), so we require a genuinely confident match.
+          const detections = await faceapi
+            .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.6 }))
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+          const confident = detections.filter(d => d.detection.score >= 0.6);
+
+          if (confident.length === 1) {
+            if (idEmbedding) {
+              const distance = deviceCheckEuclideanDistance(Array.from(confident[0].descriptor), idEmbedding);
+              if (distance >= DEVICE_CHECK_MATCH_THRESHOLD) {
+                statusEl.textContent = "This doesn't closely match your ID verification — make sure it's really you in frame.";
+                statusEl.style.color = 'var(--warning)';
+                return;
+              }
+            }
+            statusEl.textContent = 'Camera and face detection working.';
+            statusEl.style.color = 'var(--verified)';
+            deviceCheckPassed = true;
+            continueBtn.disabled = false;
+            clearInterval(check);
+          } else if (confident.length > 1) {
+            statusEl.textContent = `${confident.length} faces detected — make sure only you are in frame.`;
+          } else {
+            statusEl.textContent = 'No face detected yet — center yourself in frame.';
+          }
+        }, 1000);
+      } catch (err) {
+        statusEl.textContent = 'Camera unavailable: ' + err.message + '. A working camera is required — fix the issue and retry.';
+        statusEl.style.color = 'var(--risk)';
+        deviceCheckPassed = false;
+        continueBtn.disabled = true;
+      }
+    }
+
+    async function confirmDeviceCheck() {
+      if (!deviceCheckPassed) return; // hard block until the live check actually passes
+      const msg = document.getElementById('msg-4');
+      const res = await fetch(`/api/students/${studentId}/device-check`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passed: deviceCheckPassed })
+      });
+
+      if (res.ok) {
+        msg.textContent = '';
+        populateReview();
+        goToStep(5);
+      } else {
+        const data = await res.json();
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Could not save device check result.';
+      }
+    }
+
+    function populateReview() {
+      const reducedSensitivity = document.getElementById('reduced-sensitivity').checked;
+      const notes = document.getElementById('notes').value.trim();
+
+      document.getElementById('rev-name').textContent = studentName;
+      document.getElementById('rev-email').textContent = document.getElementById('email').value.trim();
+      document.getElementById('rev-identity').textContent = identityVerified ? 'Verified against ID photo' : 'Not verified';
+      document.getElementById('rev-webcam').textContent = 'Active';
+      document.getElementById('rev-sensitivity').textContent = reducedSensitivity ? 'Reduced (30% more lenient)' : 'Standard';
+      document.getElementById('rev-notes').textContent = notes || 'None';
+      document.getElementById('rev-device').textContent = deviceCheckPassed ? 'Passed' : 'Not passed';
+    }
+
+    async function finishOnboarding() {
+      const msg = document.getElementById('msg-5');
+      if (!document.getElementById('consent').checked) {
+        msg.style.color = '#c1443b';
+        msg.textContent = 'Please confirm the checkbox to continue.';
+        return;
+      }
+
+      const res = await fetch(`/api/students/${studentId}/onboarding-complete`, { method: 'PATCH' });
+      if (res.ok) {
+        window.location.href = `/exam.html?studentId=${studentId}&name=${encodeURIComponent(studentName)}`;
+      } else {
+        const data = await res.json();
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Something went wrong.';
+      }
+    }
+
+    // --- Resume (from Log In) and return-from-exam banners ---
+
+    function showReturnBanner(text) {
+      const banner = document.getElementById('return-banner');
+      banner.textContent = text;
+      banner.style.display = 'block';
+    }
+
+    async function resumeExistingStudent(id) {
+      try {
+        const res = await fetch(`/api/students/${id}`);
+        if (!res.ok) return goToStep(1);
+        const student = await res.json();
+
+        if (student.sessionTerminated) {
+          const why = student.terminationReason === 'time_expired'
+            ? 'your exam session timed out'
+            : 'your trust score fell to or below the allowed limit';
+          showReturnBanner(`Your exam session was terminated because ${why}. Contact your administrator to reset your account.`);
+          return goToStep(1);
+        }
+
+        studentId = student._id;
+        studentName = student.name;
+        document.getElementById('name').value = student.name;
+        document.getElementById('email').value = student.email;
+        document.getElementById('reduced-sensitivity').checked = !!student.preferences?.reducedSensitivity;
+        document.getElementById('notes').value = student.preferences?.accessibilityNotes || '';
+        deviceCheckPassed = !!student.onboarding?.deviceCheckPassed;
+        identityVerified = !!student.idVerification?.verified;
+        if (Array.isArray(student.idVerification?.faceEmbedding)) {
+          idEmbedding = student.idVerification.faceEmbedding;
+        }
+        if (identityVerified) {
+          document.getElementById('id-continue-btn').disabled = false;
+          document.getElementById('id-photo-status').textContent = 'Face read from ID (from your earlier session).';
+        }
+
+        if (student.onboarding?.completed) {
+          window.location.href = `/exam.html?studentId=${studentId}&name=${encodeURIComponent(studentName)}`;
+          return;
+        }
+
+        goToStep(Math.min(Math.max(student.onboarding?.step || 1, 2), 5));
+      } catch (e) {
+        goToStep(1);
+      }
+    }
+
+    const initParams = new URLSearchParams(location.search);
+    const resumeId = initParams.get('resume');
+    const endedReason = initParams.get('ended');
+    if (endedReason === 'trust_score') {
+      showReturnBanner('Your trust score fell to or below the allowed limit — your exam session was terminated and you were returned here.');
+    } else if (endedReason === 'time_expired') {
+      showReturnBanner("Time's up — the 5-minute exam session ended and you were returned here.");
+    }
+
+    if (resumeId) {
+      resumeExistingStudent(resumeId);
+    } else {
+      goToStep(1);
+    }
+  </script>
+</body>
+</html>

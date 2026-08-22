@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TrustScoreX — Log In</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+  <div class="nav">
+    <div class="nav-brand"><span class="mark">TX</span> TrustScoreX</div>
+    <div class="nav-links">
+      <a href="/index.html">Register</a>
+      <a href="/login.html" class="active">Log In</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/leaderboard.html">Leaderboard</a>
+      <a href="/risk.html">Risk Monitor</a>
+      <a href="/admin.html">Admin</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <p class="eyebrow">Already registered</p>
+    <h1 class="title">Student log in</h1>
+    <p class="lede">Enter the email you registered with. If your setup is already complete, you'll go straight into a monitored exam session.</p>
+
+    <div class="card" style="max-width: 420px;">
+      <label>Email</label>
+      <input id="email" type="email" placeholder="you@college.edu" />
+      <button class="btn-gold" style="width:100%;" onclick="doLogin()">Log in</button>
+      <div id="msg" style="margin-top:14px; font-size:13px;"></div>
+      <div id="resume-block" style="display:none; margin-top:14px;">
+        <button style="width:100%;" onclick="goResume()">Continue my registration →</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let pendingResumeId = null;
+
+    async function doLogin() {
+      const email = document.getElementById('email').value.trim();
+      const msg = document.getElementById('msg');
+      const resumeBlock = document.getElementById('resume-block');
+      resumeBlock.style.display = 'none';
+      msg.style.color = '';
+      pendingResumeId = null;
+
+      if (!email) {
+        msg.style.color = '#c1443b';
+        msg.textContent = 'Enter your registered email.';
+        return;
+      }
+
+      msg.textContent = 'Checking…';
+
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Log in failed.';
+        return;
+      }
+
+      if (data.onboarding && data.onboarding.completed) {
+        msg.style.color = 'var(--verified)';
+        msg.textContent = 'Welcome back — starting your exam session…';
+        window.location.href = `/exam.html?studentId=${data._id}&name=${encodeURIComponent(data.name)}`;
+      } else {
+        msg.style.color = '';
+        msg.textContent = "You're registered, but your setup isn't finished yet.";
+        pendingResumeId = data._id;
+        resumeBlock.style.display = 'block';
+      }
+    }
+
+    function goResume() {
+      if (!pendingResumeId) return;
+      window.location.href = `/index.html?resume=${pendingResumeId}`;
+    }
+
+    document.getElementById('email').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doLogin();
+    });
+  </script>
+</body>
+</html>

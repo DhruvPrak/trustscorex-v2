@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TrustScoreX — Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/css/common.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="nav">
+    <div class="nav-brand"><span class="mark">TX</span> TrustScoreX</div>
+    <div class="nav-links">
+      <a href="/index.html">Register</a>
+      <a href="/login.html">Log In</a>
+      <a href="/dashboard.html" class="active">Dashboard</a>
+      <a href="/leaderboard.html">Leaderboard</a>
+      <a href="/risk.html">Risk Monitor</a>
+      <a href="/admin.html">Admin</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <p class="eyebrow">Overview</p>
+    <h1 class="title">Cohort dashboard</h1>
+    <p class="lede">Aggregate trust status across every registered student.</p>
+
+    <div class="stat-grid" id="stats"></div>
+
+    <div style="display:flex; gap:24px; flex-wrap:wrap; margin-bottom:36px;">
+      <div class="card" style="flex:1; min-width:260px; max-width:340px;">
+        <div style="position:relative; height:220px;">
+          <canvas id="statusChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>Seal</th><th>Name</th><th>Email</th><th>Score</th><th>Status</th><th>Last activity</th>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function load() {
+      const [students, analytics] = await Promise.all([
+        fetch('/api/students').then(r => r.json()),
+        fetch('/api/analytics').then(r => r.json()),
+      ]);
+
+      document.getElementById('stats').innerHTML = `
+        <div class="stat"><div class="num">${analytics.totalStudents}</div><div class="lbl">Students</div></div>
+        <div class="stat"><div class="num">${analytics.avgScore}</div><div class="lbl">Avg Score</div></div>
+        <div class="stat"><div class="num" style="color:var(--verified)">${analytics.clean}</div><div class="lbl">Clean</div></div>
+        <div class="stat"><div class="num" style="color:var(--warning)">${analytics.warning}</div><div class="lbl">Warning</div></div>
+        <div class="stat"><div class="num" style="color:var(--risk)">${analytics.highRisk}</div><div class="lbl">High Risk</div></div>
+      `;
+
+      new Chart(document.getElementById('statusChart'), {
+        type: 'doughnut',
+        data: {
+          labels: ['Clean', 'Warning', 'High Risk'],
+          datasets: [{
+            data: [analytics.clean, analytics.warning, analytics.highRisk],
+            backgroundColor: ['#2e8b67', '#c98a2e', '#c1443b'],
+            borderWidth: 0,
+          }]
+        },
+        options: {
+          maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#12172b' } } }
+        }
+      });
+
+      document.getElementById('rows').innerHTML = students.map(s => `
+        <tr>
+          <td><div class="seal seal-sm status-${s.status}"><div class="score">${s.trustScore}</div></div></td>
+          <td>${s.name}</td>
+          <td>${s.email}</td>
+          <td style="font-family:var(--font-mono);">${s.trustScore}</td>
+          <td><span class="badge status-${s.status}">${s.status.replace('_',' ')}</span></td>
+          <td style="font-family:var(--font-mono); font-size:12px;">${s.lastActivityAt ? new Date(s.lastActivityAt).toLocaleDateString() + ' ' + new Date(s.lastActivityAt).toLocaleTimeString() : '—'}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="6">No students registered yet.</td></tr>';
+    }
+
+    load();
+  </script>
+</body>
+</html>

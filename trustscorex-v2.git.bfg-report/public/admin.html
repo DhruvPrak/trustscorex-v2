@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TrustScoreX — Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+  <div class="nav">
+    <div class="nav-brand"><span class="mark">TX</span> TrustScoreX</div>
+    <div class="nav-links">
+      <a href="/index.html">Register</a>
+      <a href="/login.html">Log In</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/leaderboard.html">Leaderboard</a>
+      <a href="/risk.html">Risk Monitor</a>
+      <a href="/admin.html" class="active">Admin</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div id="login-view">
+      <p class="eyebrow">Restricted</p>
+      <h1 class="title">Admin sign in</h1>
+      <div class="card" style="max-width:380px;">
+        <label>Username</label>
+        <input id="username" value="admin" />
+        <label>Password</label>
+        <input id="password" type="password" />
+        <button class="btn-gold" style="width:100%;" onclick="login()">Sign in</button>
+        <div id="login-msg" style="margin-top:12px; font-size:13px;"></div>
+      </div>
+    </div>
+
+    <div id="admin-view" style="display:none;">
+      <p class="eyebrow">Control panel</p>
+      <h1 class="title">Manage students</h1>
+      <button class="btn-sm" onclick="logout()" style="margin-bottom:24px;">Sign out</button>
+
+      <div class="card">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Score</th><th>Status</th><th>Session</th><th>Last activity</th><th>Accommodations</th><th>Actions</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+
+      <div class="card" id="activity-panel" style="display:none; margin-top:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0; font-family: var(--font-display); color:var(--ink);" id="activity-title">Activity</h3>
+          <button class="btn-sm" onclick="closeActivity()">Close</button>
+        </div>
+        <table style="margin-top:16px;">
+          <thead><tr><th>Date</th><th>Time</th><th>Action</th><th>Details</th></tr></thead>
+          <tbody id="activity-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tokenKey = 'tsx_admin_token';
+
+    function getToken() { return sessionStorage.getItem(tokenKey); }
+
+    function showView() {
+      const token = getToken();
+      document.getElementById('login-view').style.display = token ? 'none' : 'block';
+      document.getElementById('admin-view').style.display = token ? 'block' : 'none';
+      if (token) loadStudents();
+    }
+
+    async function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const msg = document.getElementById('login-msg');
+
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        sessionStorage.setItem(tokenKey, data.token);
+        showView();
+      } else {
+        msg.style.color = '#c1443b';
+        msg.textContent = data.message || 'Login failed.';
+      }
+    }
+
+    function logout() {
+      sessionStorage.removeItem(tokenKey);
+      showView();
+    }
+
+    function accommodationBadges(s) {
+      const prefs = s.preferences || {};
+      const idv = s.idVerification || {};
+      const badges = [];
+      if (idv.verified) badges.push('<span class="badge status-clean">ID verified</span>');
+      else badges.push('<span class="badge status-warning">ID not verified</span>');
+      if (!prefs.hasWebcam) badges.push('<span class="badge status-warning">No webcam</span>');
+      if (prefs.reducedSensitivity) badges.push('<span class="badge status-warning">Reduced sensitivity</span>');
+      if (prefs.accessibilityNotes) badges.push('<span class="badge status-clean" title="' + prefs.accessibilityNotes.replace(/"/g, '&quot;') + '">Notes</span>');
+      return badges.join(' ') || '<span style="color:#8a8266; font-size:12px;">—</span>';
+    }
+
+    function formatTimestamp(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+    }
+
+    function sessionBadge(s) {
+      if (!s.sessionTerminated) return '<span class="badge status-clean">Active</span>';
+      const reason = s.terminationReason === 'time_expired' ? 'Timed out' : 'Score limit';
+      return `<span class="badge status-high_risk" title="${formatTimestamp(s.terminatedAt)}">${reason}</span>`;
+    }
+
+    async function loadStudents() {
+      const students = await fetch('/api/students').then(r => r.json());
+      window.__students = students;
+      document.getElementById('rows').innerHTML = students.map(s => `
+        <tr>
+          <td>${s.name}</td>
+          <td>${s.email}</td>
+          <td style="font-family:var(--font-mono);">${s.trustScore}</td>
+          <td><span class="badge status-${s.status}">${s.status.replace('_',' ')}</span></td>
+          <td>${sessionBadge(s)}</td>
+          <td style="font-family:var(--font-mono); font-size:12px;">${formatTimestamp(s.lastActivityAt)}</td>
+          <td>${accommodationBadges(s)}</td>
+          <td>
+            <button class="btn-sm" onclick="viewActivity('${s._id}', '${s.name.replace(/'/g, "\\'")}')">Activity</button>
+            <button class="btn-sm" onclick="overrideScore('${s._id}')">Edit score</button>
+            ${s.sessionTerminated ? `<button class="btn-sm" onclick="resetSession('${s._id}')">Reset session</button>` : ''}
+            <button class="btn-sm btn-danger" onclick="removeStudent('${s._id}')">Delete</button>
+          </td>
+        </tr>
+      `).join('') || '<tr><td colspan="8">No students yet.</td></tr>';
+    }
+
+    async function resetSession(id) {
+      if (!confirm('Clear this termination and let the student log back in?')) return;
+      const res = await fetch('/api/reset-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+        body: JSON.stringify({ id })
+      });
+      if (res.status === 401) { logout(); return; }
+      loadStudents();
+    }
+
+    // Full timestamped action history for one student — every row comes
+    // straight from ExamEvent.createdAt in the database.
+    async function viewActivity(id, name) {
+      const events = await fetch(`/api/exam/events/${id}`).then(r => r.json());
+      document.getElementById('activity-title').textContent = `Activity — ${name}`;
+      document.getElementById('activity-rows').innerHTML = events.map(e => {
+        const d = new Date(e.createdAt);
+        const details = e.meta && Object.keys(e.meta).length ? JSON.stringify(e.meta) : '—';
+        return `
+          <tr>
+            <td style="font-family:var(--font-mono); font-size:12px;">${d.toLocaleDateString()}</td>
+            <td style="font-family:var(--font-mono); font-size:12px;">${d.toLocaleTimeString()}</td>
+            <td>${e.type.replace(/_/g, ' ')}</td>
+            <td style="font-family:var(--font-mono); font-size:11px; color:#8a8266;">${details}</td>
+          </tr>
+        `;
+      }).join('') || '<tr><td colspan="4">No recorded activity yet.</td></tr>';
+      document.getElementById('activity-panel').style.display = 'block';
+      document.getElementById('activity-panel').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function closeActivity() {
+      document.getElementById('activity-panel').style.display = 'none';
+    }
+
+    async function overrideScore(id) {
+      const val = prompt('New trust score (0-100):');
+      if (val === null) return;
+      const res = await fetch('/api/update-score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+        body: JSON.stringify({ id, trustScore: val })
+      });
+      if (res.status === 401) { logout(); return; }
+      loadStudents();
+    }
+
+    async function removeStudent(id) {
+      if (!confirm('Delete this student permanently?')) return;
+      const res = await fetch('/api/delete/' + id, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + getToken() }
+      });
+      if (res.status === 401) { logout(); return; }
+      loadStudents();
+    }
+
+    showView();
+  </script>
+</body>
+</html>
